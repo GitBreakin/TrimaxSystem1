@@ -12,7 +12,7 @@ public class DatabaseConnection {
 
     private static final String USER = "postgres.dfxjblrletoeukoarxlz";
 
-    private static final String PASSWORD = "rS06LjN5qcbbmQVl";
+    private static final String PASSWORD = "";
 
     public static Connection getConnection() throws SQLException {
         Properties props = new Properties();
