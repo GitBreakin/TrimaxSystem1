@@ -60,17 +60,16 @@ public class DashboardPanel extends JPanel {
                     "SELECT COUNT(*) FROM bookings", false),
             new Card("Pending Bookings",
                     "SELECT COUNT(*) FROM bookings WHERE status = 'Pending'", false),
-            // No 'Approved' status exists: treated as Pending bookings that already have a driver.
-            new Card("Approved Bookings",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Pending' AND driver_username IS NOT NULL", false),
+            new Card("Confirmed Bookings",
+                    "SELECT COUNT(*) FROM bookings WHERE status = 'Confirmed'", false),
             new Card("Assigned Bookings",
                     "SELECT COUNT(*) FROM bookings WHERE driver_username IS NOT NULL "
-                            + "AND status IN ('Pending', 'In Transit')", false),
-            new Card("Active Deliveries",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'In Transit'", false),
-            // No delivered-at column: uses the booking date.
-            new Card("Delivered Today",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Delivered' "
+                            + "AND status IN ('Pending', 'Confirmed', 'In Progress')", false),
+            new Card("In Progress",
+                    "SELECT COUNT(*) FROM bookings WHERE status = 'In Progress'", false),
+            // No completed-at column: uses the booking date.
+            new Card("Completed Today",
+                    "SELECT COUNT(*) FROM bookings WHERE status = 'Completed' "
                             + "AND transc_date::date = CURRENT_DATE", false),
             new Card("Declined Bookings", null, false),
             new Card("Cancelled Bookings",
@@ -107,7 +106,7 @@ public class DashboardPanel extends JPanel {
             "SELECT b.booking_id, c.client_name, c.address, COALESCE(u.name, '-'), COALESCE(b.vehicle_id, '-') "
                     + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
                     + "LEFT JOIN users u ON u.username = b.driver_username "
-                    + "WHERE b.status = 'In Transit' ORDER BY b.transc_date";
+                    + "WHERE b.status = 'In Progress' ORDER BY b.transc_date";
 
     private static final String SQL_DRIVERS =
             "SELECT u.username, u.name, COALESCE(v.vehicle_id, '-'), COALESCE(v.status, 'No vehicle') "
