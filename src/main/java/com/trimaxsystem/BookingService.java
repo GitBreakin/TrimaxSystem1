@@ -173,6 +173,7 @@ public class BookingService {
     /** Everything the booking detail window shows. */
     public static class Detail {
         public int bookingId;
+        public String clientId;
         public Timestamp date;
         public BigDecimal total;
         public String status;
@@ -192,7 +193,8 @@ public class BookingService {
 
     /** Loads one booking with its customer, driver, vehicle and items. Returns null if it no longer exists. */
     public static Detail loadDetail(int bookingId) throws SQLException {
-        String head = "SELECT b.booking_id, b.transc_date, b.total_amount, b.status, b.driver_username, b.vehicle_id, "
+        String head = "SELECT b.booking_id, b.client_id, b.transc_date, b.total_amount, b.status, "
+                + "b.driver_username, b.vehicle_id, "
                 + "c.client_name, c.address, c.contact_num, u.name AS driver_name, v.vehicle_type "
                 + "FROM bookings b "
                 + "LEFT JOIN clients c  ON c.client_id = b.client_id "
@@ -210,6 +212,7 @@ public class BookingService {
                 try (ResultSet rs = ps.executeQuery()) {
                     if (!rs.next()) return null;
                     d.bookingId = rs.getInt("booking_id");
+                    d.clientId = rs.getString("client_id");
                     d.date = rs.getTimestamp("transc_date");
                     d.total = rs.getBigDecimal("total_amount");
                     d.status = rs.getString("status");

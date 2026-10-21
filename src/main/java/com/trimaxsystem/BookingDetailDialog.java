@@ -2,12 +2,18 @@ package com.trimaxsystem;
 
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.io.File;
+import java.awt.print.PrinterJob;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.printing.PDFPageable;
 
 /**
  * Booking details with the status actions that are allowed from the booking's current status.
@@ -255,6 +261,13 @@ public class BookingDetailDialog extends JDialog {
         row.setOpaque(false);
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+        JButton saveReceipt = button("Save receipt PDF", false);
+        saveReceipt.addActionListener(e -> saveReceipt(d));
+        row.add(saveReceipt);
+        JButton printReceipt = button("Print receipt", false);
+        printReceipt.addActionListener(e -> printReceipt(d));
+        row.add(printReceipt);
+
         if (BookingService.canAssignDriver(d.status)) {
             JButton assign = button(d.driverUsername == null ? "Assign driver" : "Change driver", false);
             assign.addActionListener(e -> chooseAndAssignDriver());
@@ -281,6 +294,67 @@ public class BookingDetailDialog extends JDialog {
         return p;
     }
 
+    private void saveReceipt(BookingService.Detail d) {
+        JFileChooser chooser = new JFileChooser(new File("receipts"));
+        chooser.setDialogTitle("Save booking receipt");
+        chooser.setSelectedFile(new File("Receipt_" + d.bookingId + ".pdf"));
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+
+        File output = chooser.getSelectedFile();
+        if (!output.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+            output = new File(output.getParentFile(), output.getName() + ".pdf");
+        }
+        try {
+            File pdf = ReceiptPdfGenerator.generate(receiptData(d), output);
+            JOptionPane.showMessageDialog(this, "Receipt saved to:\n" + pdf.getAbsolutePath(),
+                    "Receipt Saved", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Could not save the receipt PDF: " + ex.getMessage(),
+                    "Receipt Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void printReceipt(BookingService.Detail d) {
+        File pdf = null;
+        try {
+            pdf = File.createTempFile("Receipt_" + d.bookingId + "_", ".pdf");
+            ReceiptPdfGenerator.generate(receiptData(d), pdf);
+            try (PDDocument document = PDDocument.load(pdf)) {
+                PrinterJob job = PrinterJob.getPrinterJob();
+                job.setJobName("TRI-MAX booking receipt #" + d.bookingId);
+                job.setPageable(new PDFPageable(document));
+                if (!job.printDialog()) return;
+                job.print();
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Could not print the receipt: " + ex.getMessage(),
+                    "Print Receipt", JOptionPane.ERROR_MESSAGE);
+        } finally {
+            if (pdf != null && pdf.exists() && !pdf.delete()) pdf.deleteOnExit();
+        }
+    }
+
+    private static ReceiptPdfGenerator.ReceiptData receiptData(BookingService.Detail detail) {
+        ReceiptPdfGenerator.ReceiptData data = new ReceiptPdfGenerator.ReceiptData();
+        data.bookingId = detail.bookingId;
+        data.date = detail.date;
+        data.clientId = detail.clientId == null ? "" : detail.clientId;
+        data.clientName = orDash(detail.clientName);
+        data.address = orDash(detail.address);
+        data.contact = orDash(detail.contact);
+        data.driverName = detail.driverName == null ? "Unassigned" : detail.driverName;
+        data.driverUsername = detail.driverUsername == null ? "Unassigned" : detail.driverUsername;
+        data.vehicleId = detail.vehicleId == null ? "None" : detail.vehicleId;
+        data.total = detail.total;
+        data.items = new ArrayList<>();
+        for (BookingService.Line line : detail.items) {
+            data.items.add(new BookForClientPanel.OrderItem(
+                    "", orDash(line.product), line.unitPrice == null ? 0 : line.unitPrice.doubleValue(),
+                    line.quantity, line.subtotal == null ? 0 : line.subtotal.doubleValue()));
+        }
+        return data;
+    }
+
     private JPanel card(JComponent inner) {
         JPanel c = new JPanel(new BorderLayout());
         c.setBackground(Theme.CARD);
@@ -302,8 +376,8 @@ public class BookingDetailDialog extends JDialog {
         String message = cancel
                 ? "Cancel booking #" + d.bookingId + " for " + orDash(d.clientName) + "?\n\n"
                 + (BookingStatus.IN_PROGRESS.equals(d.status)
-                    ? "This booking is already out for delivery. Only cancel it if the delivery failed or the\n"
-                    + "customer did not accept the goods.\n\n" : "")
+                ? "This booking is already out for delivery. Only cancel it if the delivery failed or the\n"
+                + "customer did not accept the goods.\n\n" : "")
                 + "The stock of its " + d.items.size() + " item line(s) will be returned to inventory.\n"
                 + "This cannot be undone."
                 : "Change booking #" + d.bookingId + " from " + d.status + " to " + target + "?";

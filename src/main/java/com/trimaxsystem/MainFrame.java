@@ -1,6 +1,9 @@
 package com.trimaxsystem;
 
 import java.awt.*;
+import java.awt.geom.Arc2D;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.Path2D;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
@@ -10,20 +13,22 @@ import javax.swing.border.EmptyBorder;
  */
 public class MainFrame extends JFrame {
 
-    /** One sidebar entry: text on the button, the page title shown in the header, and the card key. */
+    /**
+     * One sidebar entry: text on the button, the page title shown in the header, and the card key.
+     */
     private static final String[][] PAGES = {
             // { sidebar label, header title, header subtitle }
-            {"Dashboard",           "Dashboard",           "Overview of today's operations"},
-            {"Inventory",           "Inventory",           "Products, suppliers, prices and stock"},
-            {"Bookings",            "Bookings",            "All bookings and their status"},
+            {"Dashboard", "Dashboard", "Overview of today's operations"},
+            {"Inventory", "Inventory", "Products, suppliers, prices and stock"},
+            {"Bookings", "Bookings", "All bookings and their status"},
             {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions (current / stale)"},
-            {"Manage Vehicles",     "Manage Vehicles",     "Vehicle records, status, and driver assignments"},
-            {"Agents & Drivers",    "Agents & Drivers",    "Accounts, roles and account status"},
-            {"Customers",           "Customers",           "Customer records, assigned agents and locations"},
+            {"Manage Vehicles", "Manage Vehicles", "Vehicle records, status, and driver assignments"},
+            {"Agents & Drivers", "Agents & Drivers", "Accounts, roles and account status"},
+            {"Customers", "Customers", "Customer records, assigned agents and locations"},
             {"Analytics & Reports", "Analytics & Reports", "Booking volume, completion and cancellation, with CSV, Excel and PDF export"},
-            {"Notifications",       "Notifications",       "Operational alerts and announcements"},
-            {"Audit Logs",          "Audit Logs",          "Who changed what, and when (read-only)"},
-            {"System Settings",     "System Settings",     "Your profile, connection health and environment"},
+            {"Notifications", "Notifications", "Operational alerts and announcements"},
+            {"Audit Logs", "Audit Logs", "Who changed what, and when (read-only)"},
+            {"System Settings", "System Settings", "Your profile, connection health and environment"},
     };
 
     private final CardLayout cardLayout = new CardLayout();
@@ -31,11 +36,13 @@ public class MainFrame extends JFrame {
     private final JLabel titleLabel = new JLabel();
     private final JLabel subtitleLabel = new JLabel();
     private final JLabel breadcrumbLabel = new JLabel();
-    private final JButton bell = UiKit.secondaryButton("Notifications");
+    private final JButton bell = headerIconButton(new HeaderIcon(true, 0), "Notifications");
     private NotificationsPanel notificationsPanel;
     private final NavButton[] navButtons = new NavButton[PAGES.length];
 
-    /** Opens the main window straight away. */
+    /**
+     * Opens the main window straight away.
+     */
     public MainFrame() {
         this(null);
         setVisible(true);
@@ -211,22 +218,29 @@ public class MainFrame extends JFrame {
             protected void done() {
                 try {
                     int n = get();
-                    bell.setText(n > 0 ? "Notifications (" + n + " unread)" : "Notifications");
+                    bell.setIcon(new HeaderIcon(true, n));
+                    bell.setToolTipText(n > 0 ? "Notifications (" + n + " unread)" : "Notifications");
                 } catch (Exception ex) {
-                    bell.setText("Notifications");
+                    bell.setIcon(new HeaderIcon(true, 0));
+                    bell.setToolTipText("Notifications");
                 }
             }
         }.execute();
     }
 
-    /** Notification bell and admin menu. */
+    /**
+     * Notification bell and admin menu.
+     */
     private JComponent buildHeaderActions() {
-        bell.setToolTipText("Open notifications");
+        bell.setToolTipText("Notifications");
+        bell.getAccessibleContext().setAccessibleName("Notifications");
         bell.addActionListener(e -> showPage(NOTIFICATIONS_PAGE));
         refreshBell();
 
         AuthService.Session session = AuthService.current();
-        JButton menuButton = UiKit.secondaryButton(session == null ? "Admin" : session.fullName + " \u25BE");
+        JButton menuButton = headerIconButton(new HeaderIcon(false, 0), "Profile");
+        menuButton.getAccessibleContext().setAccessibleName("Profile menu");
+        menuButton.setToolTipText("Profile menu");
         JPopupMenu menu = new JPopupMenu();
         JMenuItem who = new JMenuItem(session == null ? "Not signed in"
                 : session.username + " (" + session.role + ")");
@@ -251,6 +265,80 @@ public class MainFrame extends JFrame {
         actions.add(bell);
         actions.add(menuButton);
         return actions;
+    }
+
+    private static JButton headerIconButton(Icon icon, String accessibleName) {
+        JButton button = UiKit.secondaryButton("");
+        button.setIcon(icon);
+        button.setText("");
+        button.setMargin(new Insets(4, 4, 4, 4));
+        button.setPreferredSize(new Dimension(40, 40));
+        button.setMinimumSize(new Dimension(40, 40));
+        button.setMaximumSize(new Dimension(40, 40));
+        button.setToolTipText(accessibleName);
+        button.getAccessibleContext().setAccessibleName(accessibleName);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return button;
+    }
+
+    private static final class HeaderIcon implements Icon {
+        private final boolean notification;
+        private final int unreadCount;
+
+        HeaderIcon(boolean notification, int unreadCount) {
+            this.notification = notification;
+            this.unreadCount = Math.max(0, unreadCount);
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 24;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 24;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            g.translate(x, y);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(Theme.TEXT);
+            g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            if (notification) {
+                Path2D bellShape = new Path2D.Double();
+                bellShape.moveTo(5, 17);
+                bellShape.curveTo(7, 15, 7, 13, 7, 10);
+                bellShape.curveTo(7, 6, 9, 4, 12, 4);
+                bellShape.curveTo(15, 4, 17, 6, 17, 10);
+                bellShape.curveTo(17, 13, 17, 15, 19, 17);
+                bellShape.closePath();
+                g.draw(bellShape);
+                g.drawLine(5, 18, 19, 18);
+                g.draw(new Arc2D.Double(9, 18, 6, 4, 180, 180, Arc2D.OPEN));
+                if (unreadCount > 0) {
+                    String badge = unreadCount > 9 ? "9+" : Integer.toString(unreadCount);
+                    g.setFont(new Font("SansSerif", Font.BOLD, 9));
+                    FontMetrics metrics = g.getFontMetrics();
+                    int badgeWidth = Math.max(13, metrics.stringWidth(badge) + 6);
+                    int badgeX = 22 - badgeWidth;
+                    g.setColor(Theme.DANGER);
+                    g.fillRoundRect(badgeX, 0, badgeWidth, 13, 8, 8);
+                    g.setColor(Color.WHITE);
+                    g.drawString(badge, badgeX + (badgeWidth - metrics.stringWidth(badge)) / 2, 10);
+                }
+            } else {
+                g.draw(new Ellipse2D.Double(8, 3, 8, 8));
+                Path2D shoulders = new Path2D.Double();
+                shoulders.moveTo(4, 21);
+                shoulders.curveTo(4, 16, 7, 13, 12, 13);
+                shoulders.curveTo(17, 13, 20, 16, 20, 21);
+                g.draw(shoulders);
+            }
+            g.dispose();
+        }
     }
 
     // =====================================================
@@ -292,12 +380,28 @@ public class MainFrame extends JFrame {
             setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
             setPreferredSize(new Dimension(180, 42));
             addMouseListener(new java.awt.event.MouseAdapter() {
-                @Override public void mouseEntered(java.awt.event.MouseEvent e) { hover = true; repaint(); }
-                @Override public void mouseExited(java.awt.event.MouseEvent e)  { hover = false; repaint(); }
+                @Override
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    hover = true;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    hover = false;
+                    repaint();
+                }
             });
             addFocusListener(new java.awt.event.FocusAdapter() {
-                @Override public void focusGained(java.awt.event.FocusEvent e) { repaint(); }
-                @Override public void focusLost(java.awt.event.FocusEvent e)   { repaint(); }
+                @Override
+                public void focusGained(java.awt.event.FocusEvent e) {
+                    repaint();
+                }
+
+                @Override
+                public void focusLost(java.awt.event.FocusEvent e) {
+                    repaint();
+                }
             });
         }
 

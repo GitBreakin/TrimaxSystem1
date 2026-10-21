@@ -1,6 +1,8 @@
 package com.trimaxsystem;
 
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.geom.Arc2D;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
@@ -14,6 +16,7 @@ import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Date;
@@ -61,6 +64,7 @@ public class DashboardPanel extends JPanel {
     private static final String SQL_TREND =
             "SELECT (transc_date AT TIME ZONE '" + TZ_SQL + "')::date AS d, COUNT(*) "
                     + "FROM bookings WHERE (transc_date AT TIME ZONE '" + TZ_SQL + "')::date >= ? "
+                    + "AND (transc_date AT TIME ZONE '" + TZ_SQL + "')::date <= ? "
                     + "GROUP BY d ORDER BY d";
 
     private static final String SQL_RECENT =
@@ -107,6 +111,9 @@ public class DashboardPanel extends JPanel {
     private final JLabel[] quickValues = new JLabel[4];
 
     private boolean monthView = false;
+    private boolean customView = false;
+    private LocalDate customStart;
+    private LocalDate customEnd;
     private final Timer timer;
     private Runnable onFirstLoad;   // called once, after the first refresh finishes (success or failure)
 
@@ -116,6 +123,7 @@ public class DashboardPanel extends JPanel {
         Map<String, Long> statusCounts = new LinkedHashMap<>();
         String[] trendLabels = new String[0];
         long[] trendValues = new long[0];
+        LocalDate[] trendDates = new LocalDate[0];
         String trendCaption = "";
         List<Object[]> recent = new ArrayList<>(), active = new ArrayList<>(), drivers = new ArrayList<>();
         String[] quick = new String[4];
@@ -210,10 +218,13 @@ public class DashboardPanel extends JPanel {
     /** Reloads every section in the background. */
     public void refresh() {
         final boolean month = monthView;
+        final boolean custom = customView;
+        final LocalDate start = customStart;
+        final LocalDate end = customEnd;
         new SwingWorker<Snapshot, Void>() {
             @Override
             protected Snapshot doInBackground() throws Exception {
-                return fetch(month);
+                return fetch(month, custom, start, end);
             }
 
             @Override
@@ -245,7 +256,7 @@ public class DashboardPanel extends JPanel {
         }.execute();
     }
 
-    private Snapshot fetch(boolean month) throws SQLException {
+    private Snapshot fetch(boolean month, boolean custom, LocalDate rangeStart, LocalDate rangeEnd) throws SQLException {
         Snapshot s = new Snapshot();
         LocalDate today = LocalDate.now(BUSINESS_TZ);
         try (Connection conn = DatabaseConnection.getConnection()) {
@@ -264,17 +275,22 @@ public class DashboardPanel extends JPanel {
             });
 
             s.trendOk = attempt(() -> {
-                LocalDate start = month ? today.withDayOfMonth(1) : today.minusDays(6);
-                int days = (int) (today.toEpochDay() - start.toEpochDay()) + 1;
+                LocalDate start = custom ? rangeStart : month ? today.withDayOfMonth(1) : today.minusDays(6);
+                LocalDate end = custom ? rangeEnd : today;
+                int days = (int) (end.toEpochDay() - start.toEpochDay()) + 1;
                 s.trendLabels = new String[days];
                 s.trendValues = new long[days];
+                s.trendDates = new LocalDate[days];
                 for (int i = 0; i < days; i++) {
                     LocalDate d = start.plusDays(i);
-                    s.trendLabels[i] = month ? String.valueOf(d.getDayOfMonth())
+                    s.trendDates[i] = d;
+                    s.trendLabels[i] = custom ? d.format(java.time.format.DateTimeFormatter.ofPattern("MM/dd"))
+                            : month ? String.valueOf(d.getDayOfMonth())
                             : d.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH);
                 }
                 try (PreparedStatement ps = conn.prepareStatement(SQL_TREND)) {
                     ps.setDate(1, java.sql.Date.valueOf(start));
+                    ps.setDate(2, java.sql.Date.valueOf(end));
                     try (ResultSet rs = ps.executeQuery()) {
                         while (rs.next()) {
                             int idx = (int) (rs.getDate(1).toLocalDate().toEpochDay() - start.toEpochDay());
@@ -282,7 +298,9 @@ public class DashboardPanel extends JPanel {
                         }
                     }
                 }
-                s.trendCaption = (month ? "This month, " : "Last 7 days, ") + "bookings created per day (all statuses). "
+                s.trendCaption = (custom ? start + " to " + end + ", "
+                        : month ? "This month, " : "Last 7 days, ")
+                        + "bookings created per day (all statuses). "
                         + "Days in Asia/Manila time (UTC+8).";
             });
 
@@ -364,7 +382,7 @@ public class DashboardPanel extends JPanel {
         }
 
         // Trend chart
-        if (s.trendOk) trendChart.setData(s.trendLabels, s.trendValues, s.trendCaption);
+        if (s.trendOk) trendChart.setData(s.trendLabels, s.trendValues, s.trendDates, s.trendCaption);
         else trendChart.setMessage(UNAVAILABLE);
 
         // Status donut + legend
@@ -464,19 +482,94 @@ public class DashboardPanel extends JPanel {
     private JComponent buildTrendCard() {
         JToggleButton week = toggle("Last 7 days", true);
         JToggleButton month = toggle("This month", false);
+        JToggleButton custom = toggle("Custom range", false);
         ButtonGroup group = new ButtonGroup();
         group.add(week);
         group.add(month);
-        week.addActionListener(e -> { monthView = false; refresh(); });
-        month.addActionListener(e -> { monthView = true; refresh(); });
+        group.add(custom);
+        week.addActionListener(e -> {
+            monthView = false;
+            customView = false;
+            refresh();
+        });
+        month.addActionListener(e -> {
+            monthView = true;
+            customView = false;
+            refresh();
+        });
+        custom.addActionListener(e -> showCustomRangeDialog(week, month, custom));
 
-        JPanel toggles = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        JPanel toggles = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         toggles.setOpaque(false);
         toggles.add(week);
         toggles.add(month);
+        toggles.add(custom);
 
         trendChart.setPreferredSize(new Dimension(400, 260));
         return card("Booking Trends", toggles, trendChart);
+    }
+
+    private void showCustomRangeDialog(JToggleButton week, JToggleButton month, JToggleButton custom) {
+        LocalDate today = LocalDate.now(BUSINESS_TZ);
+        LocalDate defaultStart = customStart != null ? customStart : today.minusDays(6);
+        LocalDate defaultEnd = customEnd != null ? customEnd : today;
+        JTextField startField = dateField(defaultStart);
+        JTextField endField = dateField(defaultEnd);
+
+        JPanel fields = new JPanel(new GridLayout(2, 2, 10, 10));
+        fields.setBackground(Theme.CARD);
+        fields.add(dateLabel("Start date"));
+        fields.add(startField);
+        fields.add(dateLabel("End date"));
+        fields.add(endField);
+        fields.setBorder(new EmptyBorder(12, 12, 12, 12));
+
+        while (JOptionPane.showConfirmDialog(this, fields, "Custom booking date range",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
+            try {
+                LocalDate start = LocalDate.parse(startField.getText().trim());
+                LocalDate end = LocalDate.parse(endField.getText().trim());
+                if (end.isBefore(start)) {
+                    throw new IllegalArgumentException("End date must be on or after the start date.");
+                }
+                if (end.toEpochDay() - start.toEpochDay() > 365) {
+                    throw new IllegalArgumentException("Choose a date range of no more than one year.");
+                }
+                customStart = start;
+                customEnd = end;
+                monthView = false;
+                customView = true;
+                refresh();
+                return;
+            } catch (java.time.format.DateTimeParseException ex) {
+                JOptionPane.showMessageDialog(this, "Enter both dates in YYYY-MM-DD format.",
+                        "Invalid date", JOptionPane.ERROR_MESSAGE);
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(),
+                        "Invalid date range", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+
+        if (customView) custom.setSelected(true);
+        else if (monthView) month.setSelected(true);
+        else week.setSelected(true);
+    }
+
+    private static JTextField dateField(LocalDate value) {
+        JTextField field = new JTextField(value.toString(), 10);
+        field.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        field.setForeground(Theme.TEXT);
+        field.setBackground(Theme.CARD);
+        field.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(7, 9, 7, 9)));
+        return field;
+    }
+
+    private static JLabel dateLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(new Font("SansSerif", Font.BOLD, 12));
+        label.setForeground(Theme.TEXT);
+        return label;
     }
 
     private JComponent buildStatusCard() {
@@ -714,25 +807,82 @@ public class DashboardPanel extends JPanel {
     private static final class BarChart extends JPanel {
         private String[] labels = new String[0];
         private long[] values = new long[0];
+        private LocalDate[] dates = new LocalDate[0];
         private String caption = "";
         private String message;   // when set, shown instead of the chart
+        private int hoveredBar = -1;
 
         BarChart() {
             setOpaque(false);
+            setToolTipText("");
+            addMouseMotionListener(new MouseAdapter() {
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    int bar = barAt(e.getPoint());
+                    if (bar != hoveredBar) {
+                        hoveredBar = bar;
+                        repaint();
+                    }
+                }
+            });
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    hoveredBar = -1;
+                    repaint();
+                }
+            });
         }
 
-        void setData(String[] labels, long[] values, String caption) {
+        void setData(String[] labels, long[] values, LocalDate[] dates, String caption) {
             this.labels = labels;
             this.values = values;
+            this.dates = dates;
             this.caption = caption;
+            hoveredBar = -1;
             long sum = 0;
             for (long v : values) sum += v;
             this.message = sum == 0 ? "No bookings in this period." : null;
             repaint();
         }
 
+        @Override
+        public String getToolTipText(MouseEvent event) {
+            int bar = barAt(event.getPoint());
+            if (bar < 0 || bar >= dates.length) return null;
+            String date = dates[bar].format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.ENGLISH));
+            String day = dates[bar].getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+            return "<html><b>" + date + "</b><br>" + day + "<br>"
+                    + values[bar] + " Bookings</html>";
+        }
+
+        private int barAt(Point point) {
+            if (message != null || values.length == 0) return -1;
+            long max = 0;
+            for (long value : values) max = Math.max(max, value);
+            long step = niceStep(Math.max(1, (max + 3) / 4));
+            long top = step * 4;
+            int left = 36, right = 8, topPad = 14, bottomPad = 22 + 22;
+            int plotW = getWidth() - left - right, plotH = getHeight() - topPad - bottomPad;
+            if (plotW <= 0 || plotH <= 0) return -1;
+            double slot = plotW / (double) values.length;
+            int barW = (int) Math.max(4, Math.min(48, slot * 0.6));
+            int baseline = topPad + plotH;
+            for (int i = 0; i < values.length; i++) {
+                int cx = left + (int) Math.round(slot * i + slot / 2);
+                int barHeight = (int) Math.round(plotH * values[i] / (double) top);
+                int x = cx - barW / 2;
+                int y = baseline - barHeight;
+                Rectangle hitArea = new Rectangle(x, barHeight == 0 ? baseline - 6 : y,
+                        barW, Math.max(barHeight, 6));
+                if (hitArea.contains(point)) return i;
+            }
+            return -1;
+        }
+
         void setMessage(String message) {
             this.message = message;
+            hoveredBar = -1;
             repaint();
         }
 
@@ -797,8 +947,12 @@ public class DashboardPanel extends JPanel {
                 int cx = left + (int) Math.round(slot * i + slot / 2);
                 int bh = (int) Math.round(plotH * values[i] / (double) top);
                 int x = cx - barW / 2, y = topPad + plotH - bh;
-                g2.setColor(Theme.BLUE);
+                g2.setColor(i == hoveredBar ? Theme.BLUE_DARK : Theme.BLUE);
                 if (bh > 0) g2.fillRoundRect(x, y, barW, bh, 4, 4);
+                if (i == hoveredBar) {
+                    g2.setColor(Theme.BLUE_DARK);
+                    g2.drawRoundRect(x, y, barW, Math.max(bh, 1), 4, 4);
+                }
                 if (valueLabels && values[i] > 0) {
                     g2.setColor(Theme.TEXT);
                     String s = String.valueOf(values[i]);
