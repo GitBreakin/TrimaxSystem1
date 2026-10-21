@@ -157,4 +157,202 @@ public class BookingService {
             }
         }
     }
+
+    // =====================================================
+    // DETAILS AND STATUS CHANGES (admin booking screens)
+    // =====================================================
+
+    /** One product line of a booking. */
+    public static class Line {
+        public String product;
+        public int quantity;
+        public BigDecimal unitPrice;
+        public BigDecimal subtotal;
+    }
+
+    /** Everything the booking detail window shows. */
+    public static class Detail {
+        public int bookingId;
+        public Timestamp date;
+        public BigDecimal total;
+        public String status;
+        public String clientName, address, contact;
+        public String driverName, driverUsername, vehicleId, vehicleType;
+        public List<Line> items = new ArrayList<>();
+        /** Audit entries for this booking; null when the audit table does not exist yet or could not be read. */
+        public List<AuditService.Entry> history;
+    }
+
+    /** The booking was changed by someone else since the admin opened it. */
+    public static class ConflictException extends Exception {
+        public ConflictException(String message) {
+            super(message);
+        }
+    }
+
+    /** Loads one booking with its customer, driver, vehicle and items. Returns null if it no longer exists. */
+    public static Detail loadDetail(int bookingId) throws SQLException {
+        String head = "SELECT b.booking_id, b.transc_date, b.total_amount, b.status, b.driver_username, b.vehicle_id, "
+                + "c.client_name, c.address, c.contact_num, u.name AS driver_name, v.vehicle_type "
+                + "FROM bookings b "
+                + "LEFT JOIN clients c  ON c.client_id = b.client_id "
+                + "LEFT JOIN users u    ON u.username = b.driver_username "
+                + "LEFT JOIN vehicles v ON v.vehicle_id = b.vehicle_id "
+                + "WHERE b.booking_id = ?";
+        String lines = "SELECT p.product_name, bi.quantity, bi.unit_price, bi.subtotal "
+                + "FROM booking_items bi LEFT JOIN products p ON p.product_id = bi.product_id "
+                + "WHERE bi.booking_id = ? ORDER BY bi.item_id";
+
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            Detail d = new Detail();
+            try (PreparedStatement ps = conn.prepareStatement(head)) {
+                ps.setInt(1, bookingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return null;
+                    d.bookingId = rs.getInt("booking_id");
+                    d.date = rs.getTimestamp("transc_date");
+                    d.total = rs.getBigDecimal("total_amount");
+                    d.status = rs.getString("status");
+                    d.driverUsername = rs.getString("driver_username");
+                    d.vehicleId = rs.getString("vehicle_id");
+                    d.clientName = rs.getString("client_name");
+                    d.address = rs.getString("address");
+                    d.contact = rs.getString("contact_num");
+                    d.driverName = rs.getString("driver_name");
+                    d.vehicleType = rs.getString("vehicle_type");
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(lines)) {
+                ps.setInt(1, bookingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Line l = new Line();
+                        l.product = rs.getString(1);
+                        l.quantity = rs.getInt(2);
+                        l.unitPrice = rs.getBigDecimal(3);
+                        l.subtotal = rs.getBigDecimal(4);
+                        d.items.add(l);
+                    }
+                }
+            }
+            try {
+                d.history = AuditService.load(conn, "booking", String.valueOf(bookingId));
+            } catch (SQLException e) {
+                d.history = null;   // history is optional; the booking itself still loads
+            }
+            return d;
+        }
+    }
+
+    /**
+     * Moves a booking to a new status. The admin role is re-checked in the database first, the move
+     * must be allowed by {@link BookingStatus}, and the update only happens if the booking still has
+     * the status the admin saw (otherwise ConflictException). Cancelling also returns the booking's
+     * stock to inventory, in the same transaction, because creating a booking took it out.
+     */
+    public static boolean changeStatus(int bookingId, String expectedCurrent, String newStatus)
+            throws SQLException, AuthService.AuthException, ConflictException {
+        AuthService.requireAdmin();
+        if (!BookingStatus.canTransition(expectedCurrent, newStatus)) {
+            throw new IllegalStateException("A booking cannot move from " + expectedCurrent + " to " + newStatus + ".");
+        }
+
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE bookings SET status = ? WHERE booking_id = ? AND status = ?")) {
+                    ps.setString(1, newStatus);
+                    ps.setInt(2, bookingId);
+                    ps.setString(3, expectedCurrent);
+                    if (ps.executeUpdate() != 1) {
+                        throw new ConflictException("This booking was changed by someone else. "
+                                + "It has been reloaded; please check its current status.");
+                    }
+                }
+                if (BookingStatus.CANCELLED.equals(newStatus)) {
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "UPDATE products p SET stock = p.stock + s.qty FROM ("
+                                    + "SELECT product_id, SUM(quantity) AS qty FROM booking_items "
+                                    + "WHERE booking_id = ? GROUP BY product_id) s "
+                                    + "WHERE p.product_id = s.product_id")) {
+                        ps.setInt(1, bookingId);
+                        ps.executeUpdate();
+                    }
+                }
+                boolean audited = AuditService.record(conn, "booking.status_change", "booking",
+                        String.valueOf(bookingId), "success", expectedCurrent + " -> " + newStatus);
+                conn.commit();
+                return audited;
+            } catch (SQLException | ConflictException | RuntimeException ex) {
+                conn.rollback();
+                throw ex;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+    }
+
+    /** A driver may only be assigned or changed while the booking is Pending or Confirmed. */
+    public static boolean canAssignDriver(String status) {
+        return BookingStatus.PENDING.equals(status) || BookingStatus.CONFIRMED.equals(status);
+    }
+
+    /**
+     * Assigns or reassigns the driver (and that driver's vehicle) of a booking. Same safety rules as the
+     * status change: admin re-checked in the database, only while Pending/Confirmed, and the update only
+     * happens if the booking still has the status and driver the admin saw (otherwise ConflictException).
+     * The new vehicle must still be Available and belong to an Active Driver; it is locked while checked.
+     * Returns true if the change was written to the audit log.
+     */
+    public static boolean assignDriver(int bookingId, String expectedStatus, String expectedDriver,
+                                       DriverOption newDriver)
+            throws SQLException, AuthService.AuthException, ConflictException {
+        AuthService.requireAdmin();
+        if (!canAssignDriver(expectedStatus)) {
+            throw new IllegalStateException("The driver can only be changed while the booking is Pending or Confirmed.");
+        }
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement chk = conn.prepareStatement(
+                        "SELECT v.status FROM vehicles v JOIN users u ON u.username = v.username "
+                                + "JOIN roles r ON r.role_id = u.role_id "
+                                + "WHERE v.vehicle_id = ? AND v.username = ? AND u.account_status = 'Active' "
+                                + "AND r.role_name = 'Driver' FOR UPDATE OF v")) {
+                    chk.setString(1, newDriver.vehicleId);
+                    chk.setString(2, newDriver.username);
+                    try (ResultSet rs = chk.executeQuery()) {
+                        if (!rs.next() || !"Available".equals(rs.getString(1))) {
+                            throw new IllegalStateException("The selected driver/vehicle is no longer available.");
+                        }
+                    }
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE bookings SET driver_username = ?, vehicle_id = ? "
+                                + "WHERE booking_id = ? AND status = ? AND driver_username IS NOT DISTINCT FROM ?")) {
+                    ps.setString(1, newDriver.username);
+                    ps.setString(2, newDriver.vehicleId);
+                    ps.setInt(3, bookingId);
+                    ps.setString(4, expectedStatus);
+                    ps.setString(5, expectedDriver);
+                    if (ps.executeUpdate() != 1) {
+                        throw new ConflictException("This booking was changed by someone else. "
+                                + "It has been reloaded; please check it and try again.");
+                    }
+                }
+                boolean audited = AuditService.record(conn, "booking.assign_driver", "booking",
+                        String.valueOf(bookingId), "success",
+                        (expectedDriver == null ? "unassigned" : expectedDriver) + " -> " + newDriver.username
+                                + " (vehicle " + newDriver.vehicleId + ")");
+                conn.commit();
+                return audited;
+            } catch (SQLException | ConflictException | RuntimeException ex) {
+                conn.rollback();
+                throw ex;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+    }
 }

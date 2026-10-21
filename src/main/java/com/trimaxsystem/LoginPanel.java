@@ -113,10 +113,7 @@ public class LoginPanel extends JPanel {
                     AuthUI.wipe(password);
                     setBusy(false);
                     txtPassword.setText("");
-                    parentFrame.onLoginSuccess(session);
-                    MainFrame mainframe = new MainFrame();
-                    mainframe.setVisible(true);
-
+                    parentFrame.onLoginSuccess(session);   // shows the loading screen, opens the main window
                 },
                 message -> {
                     AuthUI.wipe(password);

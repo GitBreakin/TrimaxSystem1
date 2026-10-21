@@ -7,126 +7,41 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import javax.swing.*;
-import javax.swing.border.Border;
-import javax.swing.plaf.basic.BasicArrowButton;
-import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
 
 public class InventoryPanel extends JPanel {
 
-    // Reference width of the design (taken from the target screenshot)
-    private static final double DESIGN_WIDTH = 1085.0;
+    private final DefaultTableModel inventoryTable;
+    private final JTable table;
 
-    private static final Color FIELD_BG   = Color.decode("#F4F6F8");
-    private static final Color DARK       = Color.decode("#45494D");
-    private static final Color BLUE       = Color.decode("#2563EB");
-    private static final Color BORDER_CLR = Color.decode("#555555");
-
-    private DefaultTableModel inventoryTable;
-    private JTable table;
-
-    // Input fields are class-level so the table click can fill them
-    private JTextField txtProduct;
-    private JTextField txtSupplier;
-    private JTextField txtPrice;
-    private JTextField txtStock;
-    private JTextField txtSearch;
-    private JComboBox<String> cmbFilter;
+    private final JTextField txtProduct = new JTextField(16);
+    private final JTextField txtSupplier = new JTextField(16);
+    private final JTextField txtPrice = new JTextField(10);
+    private final JTextField txtStock = new JTextField(10);
+    private final JTextField txtSearch = new JTextField(20);
+    private final JComboBox<String> cmbFilter =
+            new JComboBox<>(new String[]{"All stock levels", "High", "Moderate", "Low", "Critical", "Out"});
+    private final JLabel lblCount;
 
     // Product ID of the currently selected row (null = nothing selected)
-    private String selectedProductId = null;
+    private String selectedProductId;
 
     public InventoryPanel() {
-        setBackground(Color.WHITE);
-        setLayout(new BorderLayout());
+        setBackground(Theme.BACKGROUND);
+        setLayout(new BorderLayout(0, 12));
+        setBorder(new EmptyBorder(14, 20, 16, 20));
 
-        // ---------- TOP AREA (absolute layout scaled to panel width) ----------
-        JPanel top = new JPanel(null) {
-            @Override
-            public void doLayout() {
-                double s = getWidth() / DESIGN_WIDTH;
-                for (Component c : getComponents()) {
-                    Rectangle r = (Rectangle) ((JComponent) c).getClientProperty("design");
-                    if (r != null) {
-                        c.setBounds((int) Math.round(r.x * s), r.y,
-                                (int) Math.round(r.width * s), r.height);
-                    }
-                }
-            }
-        };
-        top.setBackground(Color.WHITE);
-        top.setPreferredSize(new Dimension(1085, 190));
+        JPanel controls = new JPanel();
+        controls.setOpaque(false);
+        controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
+        controls.add(buildProductCard());
+        controls.add(Box.createVerticalStrut(10));
+        controls.add(buildSearchCard());
+        add(controls, BorderLayout.NORTH);
 
-        // Labels
-        place(top, makeLabel("Product:"),         12,  4,   150, 20);
-        place(top, makeLabel("Supplier:"),        314, 4,   150, 20);
-        place(top, makeLabel("Price:"),           652, 4,   100, 20);
-        place(top, makeLabel("Stock:"),           914, 4,   100, 20);
-        place(top, makeLabel("Search Products:"), 12,  110, 200, 20);
-
-        // Input fields
-        txtProduct  = makeField();
-        txtSupplier = makeField();
-        txtPrice    = makeField();
-        txtStock    = makeField();
-        txtSearch   = makeField();
-
-        place(top, txtProduct,  12,  28,  231, 44);
-        place(top, txtSupplier, 314, 28,  231, 44);
-        place(top, txtPrice,    652, 28,  162, 44);
-        place(top, txtStock,    914, 28,  163, 44);
-        place(top, txtSearch,   12,  138, 356, 44);
-
-        // Status filter
-        String[] filterOptions = {"Status", "High", "Moderate", "Low", "Critical", "Out"};
-        cmbFilter = makeCombo(filterOptions);
-        cmbFilter.addActionListener(e -> searchProducts());
-        place(top, cmbFilter, 237, 102, 132, 27);
-
-        // ---------- BUTTONS ----------
-        JButton btnSearch = makeButton("Search");
-        btnSearch.addActionListener(e -> {
-            searchProducts();
-            clearFields();
-        });
-        txtSearch.addActionListener(e -> searchProducts()); // Enter key still searches
-
-        JButton btnClear = makeButton("Clear Fields");
-        btnClear.addActionListener(e -> clearFields());
-
-        JButton btnAdd = makeButton("Add A Product");
-        btnAdd.addActionListener(e -> {
-            addProduct();
-            clearFields();
-        });
-
-        JButton btnUpdate = makeButton("Update Product");
-        btnUpdate.addActionListener(e -> {
-            updateProduct();
-            clearFields();
-        });
-
-        JButton btnDelete = makeButton("Delete Product");
-        btnDelete.addActionListener(e -> {
-            // If the user clicks "No" in the confirmation, keep the fields as they are
-            if (deleteProduct()) {
-                clearFields();
-            }
-        });
-
-        place(top, btnSearch, 375, 138, 150, 44);
-        place(top, btnClear,  614, 87,  220, 44);
-        place(top, btnAdd,    857, 87,  220, 44);
-        place(top, btnUpdate, 614, 138, 220, 44);
-        place(top, btnDelete, 857, 138, 220, 44);
-
-        add(top, BorderLayout.NORTH);
-
-        // ---------- TABLE ----------
         String[] columnNames = {"Product ID", "Product", "Supplier", "Price", "Stock", "Status"};
-
         inventoryTable = new DefaultTableModel(null, columnNames) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -135,25 +50,19 @@ public class InventoryPanel extends JPanel {
         };
 
         table = new JTable(inventoryTable);
-        table.setRowHeight(32);
-        table.setBackground(FIELD_BG);
-        table.setShowGrid(false);
-        table.setIntercellSpacing(new Dimension(0, 0));
-        table.setFillsViewportHeight(true);
-        table.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setSelectionBackground(BLUE);
-        table.setSelectionForeground(Color.WHITE);
+        styleTable();
         for (int i = 0; i < columnNames.length; i++) {
             table.getColumnModel().getColumn(i).setPreferredWidth(100);
         }
 
-        // Clicking a row fills the text fields above
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
-            int row = table.getSelectedRow();
-            if (row == -1) return;
+            int viewRow = table.getSelectedRow();
+            if (viewRow == -1) {
+                selectedProductId = null;
+                return;
+            }
+            int row = table.convertRowIndexToModel(viewRow);
 
             selectedProductId = String.valueOf(inventoryTable.getValueAt(row, 0));
             txtProduct.setText(String.valueOf(inventoryTable.getValueAt(row, 1)));
@@ -162,108 +71,213 @@ public class InventoryPanel extends JPanel {
             txtStock.setText(String.valueOf(inventoryTable.getValueAt(row, 4)));
         });
 
-        // Left-aligned cells with padding
-        DefaultTableCellRenderer cellRenderer = new DefaultTableCellRenderer();
-        cellRenderer.setHorizontalAlignment(SwingConstants.LEFT);
-        cellRenderer.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
-        table.setDefaultRenderer(Object.class, cellRenderer);
-
-        // Dark header
-        JTableHeader header = table.getTableHeader();
-        header.setReorderingAllowed(false);
-        header.setResizingAllowed(false);
-        header.setPreferredSize(new Dimension(100, 32));
-        DefaultTableCellRenderer headerRenderer = new DefaultTableCellRenderer();
-        headerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
-        headerRenderer.setBackground(DARK);
-        headerRenderer.setForeground(Color.decode("#D1D5DB"));
-        headerRenderer.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        headerRenderer.setOpaque(true);
-        headerRenderer.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, Color.decode("#5E6368")));
-        header.setDefaultRenderer(headerRenderer);
-
         JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createLineBorder(BORDER_CLR));
-        scrollPane.getViewport().setBackground(FIELD_BG);
+        scrollPane.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        scrollPane.getViewport().setBackground(Theme.CARD);
 
-        add(scrollPane, BorderLayout.CENTER);
+        JPanel tableCard = new JPanel(new BorderLayout(0, 8));
+        tableCard.setBackground(Theme.CARD);
+        tableCard.setBorder(cardBorder());
+        JPanel tableHeading = new JPanel(new BorderLayout());
+        tableHeading.setOpaque(false);
+        JLabel tableTitle = new JLabel("Inventory");
+        tableTitle.setFont(new Font("SansSerif", Font.BOLD, 16));
+        tableTitle.setForeground(Theme.TEXT);
+        lblCount = new JLabel(" ");
+        lblCount.setFont(Theme.SUBTLE);
+        lblCount.setForeground(Theme.MUTED);
+        tableHeading.add(tableTitle, BorderLayout.WEST);
+        tableHeading.add(lblCount, BorderLayout.EAST);
+        tableCard.add(tableHeading, BorderLayout.NORTH);
+        tableCard.add(scrollPane, BorderLayout.CENTER);
+        add(tableCard, BorderLayout.CENTER);
 
-        loadInventory("", "Status");
+        loadInventory("", "All stock levels");
     }
 
     // ---------- HELPERS ----------
 
-    private void place(JPanel parent, JComponent c, int x, int y, int w, int h) {
-        c.putClientProperty("design", new Rectangle(x, y, w, h));
-        parent.add(c);
-    }
+    private JPanel buildProductCard() {
+        styleField(txtProduct);
+        styleField(txtSupplier);
+        styleField(txtPrice);
+        styleField(txtStock);
 
-    private JLabel makeLabel(String text) {
-        JLabel l = new JLabel(text);
-        l.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        l.setForeground(Color.decode("#222222"));
-        return l;
-    }
+        JPanel card = new JPanel(new BorderLayout(0, 10));
+        card.setBackground(Theme.CARD);
+        card.setBorder(cardBorder());
 
-    private JTextField makeField() {
-        JTextField f = new JTextField();
-        f.setBackground(FIELD_BG);
-        f.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        Border line = BorderFactory.createLineBorder(BORDER_CLR);
-        f.setBorder(BorderFactory.createCompoundBorder(line,
-                BorderFactory.createEmptyBorder(0, 6, 0, 6)));
-        return f;
-    }
+        JPanel heading = new JPanel(new BorderLayout(0, 3));
+        heading.setOpaque(false);
+        JLabel title = new JLabel("Product details");
+        title.setFont(new Font("SansSerif", Font.BOLD, 16));
+        title.setForeground(Theme.TEXT);
+        JLabel hint = new JLabel("Select a product below to edit its details.");
+        hint.setFont(Theme.SUBTLE);
+        hint.setForeground(Theme.MUTED);
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(hint, BorderLayout.SOUTH);
+        card.add(heading, BorderLayout.NORTH);
 
-    private JButton makeButton(String text) {
-        JButton b = new JButton(text);
-        b.setBackground(BLUE);
-        b.setForeground(Color.WHITE);
-        b.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        b.setFocusable(false);
-        b.setOpaque(true);
-        b.setContentAreaFilled(true);
-        b.setBorder(BorderFactory.createLineBorder(Color.decode("#1E293B")));
-        return b;
-    }
+        JPanel fields = new JPanel(new GridLayout(1, 4, 12, 0));
+        fields.setOpaque(false);
+        fields.add(fieldGroup("Product", txtProduct));
+        fields.add(fieldGroup("Supplier", txtSupplier));
+        fields.add(fieldGroup("Price", txtPrice));
+        fields.add(fieldGroup("Stock quantity", txtStock));
+        card.add(fields, BorderLayout.CENTER);
 
-    private JComboBox<String> makeCombo(String[] items) {
-        JComboBox<String> cb = new JComboBox<>(items);
-        cb.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        cb.setBackground(DARK);
-        cb.setForeground(Color.decode("#C9CDD2"));
-        cb.setBorder(BorderFactory.createLineBorder(BORDER_CLR));
-        cb.setUI(new BasicComboBoxUI() {
-            @Override
-            protected JButton createArrowButton() {
-                BasicArrowButton arrow = new BasicArrowButton(
-                        BasicArrowButton.SOUTH, DARK, DARK, Color.WHITE, DARK);
-                arrow.setBorder(BorderFactory.createEmptyBorder());
-                return arrow;
-            }
+        JButton btnClear = UiKit.secondaryButton("Clear fields");
+        JButton btnAdd = UiKit.primaryButton("Add product");
+        JButton btnUpdate = UiKit.secondaryButton("Update product");
+        JButton btnDelete = UiKit.dangerButton("Delete product");
+        btnClear.addActionListener(e -> clearFields());
+        btnAdd.addActionListener(e -> {
+            addProduct();
+            clearFields();
         });
-        cb.setRenderer(new DefaultListCellRenderer() {
+        btnUpdate.addActionListener(e -> {
+            updateProduct();
+            clearFields();
+        });
+        btnDelete.addActionListener(e -> {
+            if (deleteProduct()) clearFields();
+        });
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(btnClear);
+        actions.add(btnAdd);
+        actions.add(btnUpdate);
+        actions.add(btnDelete);
+        card.add(actions, BorderLayout.SOUTH);
+        return card;
+    }
+
+    private JPanel buildSearchCard() {
+        UiKit.styleField(txtSearch);
+        txtSearch.setToolTipText("Search by product ID, product name, or supplier");
+        txtSearch.addActionListener(e -> searchProducts());
+        cmbFilter.setFont(Theme.SUBTLE);
+        cmbFilter.setBackground(Theme.CARD);
+        cmbFilter.setForeground(Theme.TEXT);
+        cmbFilter.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        cmbFilter.addActionListener(e -> searchProducts());
+
+        JButton btnSearch = UiKit.primaryButton("Search");
+        btnSearch.addActionListener(e -> searchProducts());
+
+        JPanel card = new JPanel(new BorderLayout(12, 0));
+        card.setBackground(Theme.CARD);
+        card.setBorder(cardBorder());
+        JPanel searchGroup = new JPanel(new BorderLayout(8, 0));
+        searchGroup.setOpaque(false);
+        searchGroup.add(UiKit.caption("Search products"), BorderLayout.NORTH);
+        searchGroup.add(txtSearch, BorderLayout.CENTER);
+
+        JPanel filterGroup = new JPanel(new BorderLayout(8, 0));
+        filterGroup.setOpaque(false);
+        filterGroup.add(UiKit.caption("Stock status"), BorderLayout.NORTH);
+        filterGroup.add(cmbFilter, BorderLayout.CENTER);
+
+        JPanel inputs = new JPanel(new GridBagLayout());
+        inputs.setOpaque(false);
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridy = 0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(0, 0, 0, 10);
+        c.weightx = 1;
+        inputs.add(searchGroup, c);
+        c.gridx = 1;
+        c.weightx = 0;
+        inputs.add(filterGroup, c);
+        card.add(inputs, BorderLayout.CENTER);
+        card.add(btnSearch, BorderLayout.EAST);
+        return card;
+    }
+
+    private JPanel fieldGroup(String label, JTextField field) {
+        JPanel group = new JPanel(new BorderLayout(0, 5));
+        group.setOpaque(false);
+        group.add(UiKit.caption(label), BorderLayout.NORTH);
+        group.add(field, BorderLayout.CENTER);
+        return group;
+    }
+
+    private javax.swing.border.Border cardBorder() {
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(12, 14, 12, 14));
+    }
+
+    private void styleField(JTextField field) {
+        field.setBackground(Theme.CARD);
+        UiKit.styleField(field);
+    }
+
+    private void styleTable() {
+        table.setRowHeight(34);
+        table.setFont(Theme.SUBTLE);
+        table.setForeground(Theme.TEXT);
+        table.setBackground(Theme.CARD);
+        table.setSelectionBackground(Color.decode("#DBEAFE"));
+        table.setSelectionForeground(Theme.TEXT);
+        table.setShowVerticalLines(false);
+        table.setGridColor(Theme.BORDER);
+        table.setIntercellSpacing(new Dimension(0, 1));
+        table.setFillsViewportHeight(true);
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        table.setAutoCreateRowSorter(true);
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                          boolean isSelected, boolean cellHasFocus) {
-                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                if (index == -1) {
-                    setBackground(DARK);
-                    setForeground(Color.decode("#C9CDD2"));
+            public Component getTableCellRendererComponent(JTable t, Object value, boolean selected,
+                                                           boolean focus, int row, int column) {
+                super.getTableCellRendererComponent(t, value, selected, false, row, column);
+                setFont(Theme.SUBTLE);
+                setForeground(Theme.TEXT);
+                setBorder(new EmptyBorder(0, 8, 0, 8));
+                if (column == 5 && !selected) {
+                    String status = value == null ? "" : value.toString();
+                    switch (status) {
+                        case "High":
+                            setForeground(Theme.OK);
+                            break;
+                        case "Moderate":
+                            setForeground(Theme.BLUE);
+                            break;
+                        case "Low":
+                            setForeground(Theme.WARN);
+                            break;
+                        case "Critical":
+                        case "Out":
+                            setForeground(Theme.DANGER);
+                            break;
+                        default:
+                            setForeground(Theme.MUTED);
+                    }
+                    setFont(Theme.NAV_ON);
                 }
-                setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
                 return this;
             }
         });
-        return cb;
+        DefaultTableCellRenderer headerRenderer = new DefaultTableCellRenderer();
+        headerRenderer.setHorizontalAlignment(SwingConstants.LEFT);
+        headerRenderer.setBackground(Color.decode("#F8FAFC"));
+        headerRenderer.setForeground(Theme.MUTED);
+        headerRenderer.setFont(new Font("SansSerif", Font.BOLD, 12));
+        headerRenderer.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
+        table.getTableHeader().setDefaultRenderer(headerRenderer);
+        table.getTableHeader().setReorderingAllowed(false);
+        table.getTableHeader().setPreferredSize(new Dimension(100, 34));
     }
 
     private String getStatus(int stock) {
         if (stock > 99)      return "High";
         else if (stock > 59) return "Moderate";
         else if (stock > 29) return "Low";
-        else if (stock > 9)  return "Critical";
-        else                 return "Out";
+        //else if (stock > 9)  return "Critical";
+        else if (stock == 0) return "Out";
+        else                 return "Critical";
     }
 
     /** Blanks Product/Supplier/Price/Stock and deselects the table row. */
@@ -280,7 +294,7 @@ public class InventoryPanel extends JPanel {
 
     /** Reload everything (keeps your old loadInventory() calls working). */
     public void loadInventory() {
-        loadInventory("", "Status");
+        loadInventory("", "All stock levels");
     }
 
     private void searchProducts() {
@@ -307,8 +321,8 @@ public class InventoryPanel extends JPanel {
                     int stock = rs.getInt("stock");
                     String status = getStatus(stock);
 
-                    // Apply the Status filter ("Status" = no filter)
-                    if (!"Status".equals(statusFilter) && !status.equals(statusFilter)) {
+                    if (statusFilter != null && !"All stock levels".equals(statusFilter)
+                            && !"Status".equals(statusFilter) && !status.equals(statusFilter)) {
                         continue;
                     }
 
@@ -322,7 +336,9 @@ public class InventoryPanel extends JPanel {
                     });
                 }
             }
+            lblCount.setText(inventoryTable.getRowCount() + " products");
         } catch (SQLException e) {
+            lblCount.setText("Unable to load products");
             JOptionPane.showMessageDialog(this, "Database error: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
             e.printStackTrace();

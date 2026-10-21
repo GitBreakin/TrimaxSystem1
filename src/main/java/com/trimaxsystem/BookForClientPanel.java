@@ -8,20 +8,16 @@ import java.sql.SQLException;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
+import javax.swing.table.TableRowSorter;
 
 public class BookForClientPanel extends JPanel {
-
-    private static final Color DARK       = Color.decode("#45494D");
-    private static final Color DARK_LINE  = Color.decode("#5E6368");
-    private static final Color TEXT_LIGHT = Color.decode("#D1D5DB");
-    private static final Color BLUE       = Color.decode("#2563EB");
-    private static final Color HEADING    = Color.decode("#1E293B");
-    private static final Color BORDER_CLR = Color.decode("#555555");
-    private static final Color FIELD_BG   = Color.decode("#F4F6F8");
 
     private static final int AMOUNT_COL = 5;
 
@@ -30,7 +26,11 @@ public class BookForClientPanel extends JPanel {
     private final DefaultTableModel clientModel;
     private final DefaultTableModel itemsModel;
     private final JTextField txtSearchClient;
+    private final JTextField txtSearchProduct;
     private final JButton btnProceed;
+    private final JButton btnCancel;
+    private final TableRowSorter<DefaultTableModel> clientSorter;
+    private final TableRowSorter<DefaultTableModel> itemsSorter;
 
     /** Simple holder for an ordered line item. */
     public static class OrderItem {
@@ -50,141 +50,105 @@ public class BookForClientPanel extends JPanel {
     }
 
     public BookForClientPanel() {
-        setBackground(Color.WHITE);
-        setLayout(new GridBagLayout());
+        setBackground(Theme.BACKGROUND);
+        setLayout(new BorderLayout(0, 12));
+        setBorder(new EmptyBorder(14, 20, 16, 20));
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.weightx = 1;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.anchor = GridBagConstraints.WEST;
+        txtSearchClient = new JTextField(20);
+        UiKit.styleField(txtSearchClient);
+        txtSearchClient.setToolTipText("Search by client ID, name, address, or contact number");
+        txtSearchProduct = new JTextField(18);
+        UiKit.styleField(txtSearchProduct);
+        txtSearchProduct.setToolTipText("Search products by ID, name, or supplier");
+        JPanel clientCard = new JPanel(new BorderLayout(0, 8));
+        clientCard.setBackground(Theme.CARD);
+        clientCard.setBorder(cardBorder());
+        JPanel clientHeader = new JPanel(new BorderLayout(12, 0));
+        clientHeader.setOpaque(false);
+        clientHeader.add(sectionHeading("Select a client", "Choose the customer for this booking."),
+                BorderLayout.WEST);
+        JPanel search = new JPanel(new BorderLayout(8, 0));
+        search.setOpaque(false);
+        search.add(UiKit.caption("Search customers"), BorderLayout.NORTH);
+        search.add(txtSearchClient, BorderLayout.CENTER);
+        clientHeader.add(search, BorderLayout.EAST);
+        clientCard.add(clientHeader, BorderLayout.NORTH);
 
-        // ---------- CLIENT HEADER ROW (heading on the left, search on the right) ----------
-        JPanel headerRow = new JPanel(new BorderLayout());
-        headerRow.setOpaque(false);
-        headerRow.add(makeHeading("Select A Client"), BorderLayout.WEST);
-
-        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
-        searchPanel.setOpaque(false);
-
-        JLabel lblSearch = new JLabel("Search Client:");
-        lblSearch.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        lblSearch.setForeground(Color.decode("#222222"));
-
-        txtSearchClient = new JTextField();
-        txtSearchClient.setPreferredSize(new Dimension(243, 26));
-        txtSearchClient.setBackground(FIELD_BG);
-        txtSearchClient.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        txtSearchClient.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER_CLR),
-                BorderFactory.createEmptyBorder(0, 6, 0, 6)));
-
-        JButton btnSearch = new JButton("Search");
-        btnSearch.setPreferredSize(new Dimension(113, 37));
-        btnSearch.setBackground(BLUE);
-        btnSearch.setForeground(Color.WHITE);
-        btnSearch.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        btnSearch.setFocusable(false);
-        btnSearch.setOpaque(true);
-        btnSearch.setContentAreaFilled(true);
-        btnSearch.setBorder(BorderFactory.createLineBorder(Color.decode("#1E293B")));
-
-        searchPanel.add(lblSearch);
-        searchPanel.add(txtSearchClient);
-        searchPanel.add(btnSearch);
-        headerRow.add(searchPanel, BorderLayout.EAST);
-
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 2, 2, 2);
-        add(headerRow, gbc);
-
-        // ---------- CLIENT TABLE ----------
         String[] clientCols = {"Client ID", "Client Name", "Address", "Contact Number"};
         clientModel = new DefaultTableModel(null, clientCols) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // nothing editable in the client table
+                return false;
             }
         };
         clientTable = makeTable(clientModel);
+        clientSorter = new TableRowSorter<>(clientModel);
+        clientTable.setRowSorter(clientSorter);
         clientTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-
         JScrollPane clientScroll = makeScroll(clientTable);
         clientScroll.setPreferredSize(new Dimension(100, 177));
-
-        gbc.gridy = 1;
-        gbc.insets = new Insets(0, 2, 0, 2);
-        add(clientScroll, gbc);
-
-        // ---------- ITEMS SECTION ----------
-        gbc.gridy = 2;
-        gbc.insets = new Insets(10, 2, 2, 0);
-        add(makeHeading("Select Items"), gbc);
+        clientCard.add(clientScroll, BorderLayout.CENTER);
+        add(clientCard, BorderLayout.NORTH);
 
         String[] itemCols = {"Product ID", "Product", "Supplier", "Price", "Stock", "Amount"};
         itemsModel = new DefaultTableModel(null, itemCols) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return column == AMOUNT_COL; // ONLY "Amount" is editable
+                return column == AMOUNT_COL;
             }
         };
         itemsTable = makeTable(itemsModel);
+        itemsSorter = new TableRowSorter<>(itemsModel);
+        itemsTable.setRowSorter(itemsSorter);
         itemsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        // Commit whatever is being typed when focus leaves the cell (e.g. clicking Proceed)
         itemsTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
 
-        // Editor for the Amount column (readable on the dark background)
         JTextField editorField = new JTextField();
-        editorField.setBackground(DARK_LINE);
-        editorField.setForeground(Color.WHITE);
-        editorField.setCaretColor(Color.WHITE);
-        editorField.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
+        editorField.setBackground(Color.decode("#EFF6FF"));
+        editorField.setForeground(Theme.TEXT);
+        editorField.setCaretColor(Theme.TEXT);
+        editorField.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BLUE), new EmptyBorder(0, 7, 0, 7)));
         itemsTable.getColumnModel().getColumn(AMOUNT_COL).setCellEditor(new DefaultCellEditor(editorField));
-
         JScrollPane itemsScroll = makeScroll(itemsTable);
+        JPanel itemsCard = new JPanel(new BorderLayout(0, 8));
+        itemsCard.setBackground(Theme.CARD);
+        itemsCard.setBorder(cardBorder());
+        JPanel itemsHeader = new JPanel(new BorderLayout(12, 0));
+        itemsHeader.setOpaque(false);
+        itemsHeader.add(sectionHeading("Select items", "Enter an amount for each product to include."),
+                BorderLayout.WEST);
+        JPanel productSearch = new JPanel(new BorderLayout(8, 0));
+        productSearch.setOpaque(false);
+        productSearch.add(UiKit.caption("Search products"), BorderLayout.NORTH);
+        productSearch.add(txtSearchProduct, BorderLayout.CENTER);
+        itemsHeader.add(productSearch, BorderLayout.EAST);
+        itemsCard.add(itemsHeader, BorderLayout.NORTH);
+        itemsCard.add(itemsScroll, BorderLayout.CENTER);
+        add(itemsCard, BorderLayout.CENTER);
 
-        gbc.gridy = 3;
-        gbc.weighty = 1;
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.insets = new Insets(0, 2, 0, 2);
-        add(itemsScroll, gbc);
+        btnProceed = UiKit.primaryButton("Proceed to review");
+        btnProceed.setPreferredSize(new Dimension(180, 42));
+        btnCancel = UiKit.secondaryButton("Cancel booking");
+        btnCancel.addActionListener(e -> cancelBooking());
 
-        // ---------- PROCEED BUTTON (bottom right) ----------
-        btnProceed = new JButton("Proceed");
-        btnProceed.setBackground(BLUE);
-        btnProceed.setForeground(Color.WHITE);
-        btnProceed.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        btnProceed.setFocusable(false);
-        btnProceed.setOpaque(true);
-        btnProceed.setContentAreaFilled(true);
-        btnProceed.setBorder(BorderFactory.createLineBorder(Color.decode("#1E293B")));
-        btnProceed.setPreferredSize(new Dimension(100, 54));
-
-        JPanel bottom = new JPanel(new GridBagLayout());
+        JPanel bottom = new JPanel(new BorderLayout());
         bottom.setOpaque(false);
-        GridBagConstraints b = new GridBagConstraints();
-        b.gridy = 0;
-        b.fill = GridBagConstraints.HORIZONTAL;
-        b.gridx = 0;
-        b.weightx = 0.66;                       // spacer on the left
-        bottom.add(Box.createHorizontalGlue(), b);
-        b.gridx = 1;
-        b.weightx = 0.34;                       // button takes ~1/3 of the width
-        b.insets = new Insets(8, 0, 6, 6);
-        bottom.add(btnProceed, b);
+        JLabel instruction = new JLabel("Select a client and enter quantities, then review the booking.");
+        instruction.setFont(Theme.SUBTLE);
+        instruction.setForeground(Theme.MUTED);
+        bottom.add(instruction, BorderLayout.CENTER);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(btnCancel);
+        actions.add(btnProceed);
+        bottom.add(actions, BorderLayout.EAST);
+        add(bottom, BorderLayout.SOUTH);
 
-        gbc.gridy = 4;
-        gbc.weighty = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(0, 0, 0, 0);
-        add(bottom, gbc);
-
-        // ---------- LISTENERS ----------
-        btnSearch.addActionListener(e -> loadClients(txtSearchClient.getText().trim()));
-        txtSearchClient.addActionListener(e -> loadClients(txtSearchClient.getText().trim()));
         btnProceed.addActionListener(e -> handleProceed());
+        addSearchListener(txtSearchClient, this::filterClients);
+        addSearchListener(txtSearchProduct, this::filterProducts);
 
-        // ---------- LOAD DATA FROM THE DATABASE ----------
         loadClients("");
         loadProducts();
     }
@@ -329,68 +293,132 @@ public class BookForClientPanel extends JPanel {
     }
 
     // ---------- HELPERS ----------
-    private JLabel makeHeading(String text) {
-        JLabel l = new JLabel(text);
-        l.setFont(new Font("SansSerif", Font.BOLD, 26));
-        l.setForeground(HEADING);
-        return l;
+    private void addSearchListener(JTextField field, Runnable filter) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                filter.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                filter.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                filter.run();
+            }
+        });
+    }
+
+    private void filterClients() {
+        applyTextFilter(clientSorter, txtSearchClient.getText(), 4);
+    }
+
+    private void filterProducts() {
+        applyTextFilter(itemsSorter, txtSearchProduct.getText(), 3);
+    }
+
+    private void applyTextFilter(TableRowSorter<DefaultTableModel> sorter, String text, int columns) {
+        String keyword = text.trim();
+        if (keyword.isEmpty()) {
+            sorter.setRowFilter(null);
+            return;
+        }
+        final Pattern match = Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE);
+        RowFilter<DefaultTableModel, Integer> filter = new RowFilter<DefaultTableModel, Integer>() {
+            @Override
+            public boolean include(Entry<? extends DefaultTableModel, ? extends Integer> entry) {
+                for (int column = 0; column < columns; column++) {
+                    Object value = entry.getValue(column);
+                    if (value != null && match.matcher(value.toString()).find()) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+        sorter.setRowFilter(filter);
+    }
+
+    private void cancelBooking() {
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Cancel this booking? Your current selections will be discarded.",
+                "Cancel Booking", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) return;
+
+        Window window = SwingUtilities.getWindowAncestor(this);
+        if (window != null) window.dispose();
+    }
+
+    private JPanel sectionHeading(String titleText, String subtitleText) {
+        JPanel heading = new JPanel(new BorderLayout(0, 3));
+        heading.setOpaque(false);
+        JLabel title = new JLabel(titleText);
+        title.setFont(new Font("SansSerif", Font.BOLD, 16));
+        title.setForeground(Theme.TEXT);
+        JLabel subtitle = new JLabel(subtitleText);
+        subtitle.setFont(Theme.SUBTLE);
+        subtitle.setForeground(Theme.MUTED);
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(subtitle, BorderLayout.SOUTH);
+        return heading;
+    }
+
+    private javax.swing.border.Border cardBorder() {
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(12, 14, 12, 14));
     }
 
     private JTable makeTable(DefaultTableModel model) {
         JTable t = new JTable(model);
-        t.setRowHeight(25);
-        t.setBackground(DARK);
-        t.setForeground(TEXT_LIGHT);
-        t.setSelectionBackground(BLUE);
-        t.setSelectionForeground(Color.WHITE);
-        t.setShowGrid(false);
-        t.setIntercellSpacing(new Dimension(0, 0));
+        t.setRowHeight(32);
+        t.setBackground(Theme.CARD);
+        t.setForeground(Theme.TEXT);
+        t.setSelectionBackground(Color.decode("#DBEAFE"));
+        t.setSelectionForeground(Theme.TEXT);
+        t.setShowVerticalLines(false);
+        t.setGridColor(Theme.BORDER);
+        t.setIntercellSpacing(new Dimension(0, 1));
         t.setFillsViewportHeight(true);
-        t.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        t.setFont(Theme.SUBTLE);
         t.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
 
-        // Left-aligned cells; prices shown as 11 instead of 11.0
         final DecimalFormat fmt = new DecimalFormat("0.##");
-        DefaultTableCellRenderer cell = new DefaultTableCellRenderer() {
+        t.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
-            protected void setValue(Object value) {
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
+                                                           boolean focus, int row, int column) {
+                super.getTableCellRendererComponent(table, value, selected, false, row, column);
                 if (value instanceof Double) {
-                    setText(fmt.format(value));
+                    setText(fmt.format((Double) value));
                 } else {
-                    super.setValue(value);
+                    setText(value == null ? "" : value.toString());
                 }
-            }
-        };
-        cell.setHorizontalAlignment(SwingConstants.LEFT);
-        cell.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
-        t.setDefaultRenderer(Object.class, cell);
-
-        // Dark header with light, centered text
-        JTableHeader header = t.getTableHeader();
-        header.setReorderingAllowed(false);
-        header.setResizingAllowed(false);
-        header.setPreferredSize(new Dimension(100, 32));
-        header.setDefaultRenderer(new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(JTable table, Object value,
-                                                           boolean isSelected, boolean hasFocus, int row, int column) {
-                super.getTableCellRendererComponent(table, value, false, false, row, column);
-                setHorizontalAlignment(SwingConstants.CENTER);
-                setBackground(DARK);
-                setForeground(TEXT_LIGHT);
-                setFont(new Font("SansSerif", Font.PLAIN, 13));
-                setOpaque(true);
-                setBorder(BorderFactory.createMatteBorder(0, 0, 1, 1, DARK_LINE));
+                setFont(Theme.SUBTLE);
+                setForeground(Theme.TEXT);
+                setBorder(new EmptyBorder(0, 8, 0, 8));
                 return this;
             }
         });
+
+        DefaultTableCellRenderer header = new DefaultTableCellRenderer();
+        header.setHorizontalAlignment(SwingConstants.LEFT);
+        header.setBackground(Color.decode("#F8FAFC"));
+        header.setForeground(Theme.MUTED);
+        header.setFont(new Font("SansSerif", Font.BOLD, 12));
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
+        t.getTableHeader().setDefaultRenderer(header);
+        t.getTableHeader().setReorderingAllowed(false);
+        t.getTableHeader().setPreferredSize(new Dimension(100, 34));
         return t;
     }
 
     private JScrollPane makeScroll(JTable table) {
         JScrollPane sp = new JScrollPane(table);
-        sp.setBorder(BorderFactory.createLineBorder(BORDER_CLR));
-        sp.getViewport().setBackground(DARK_LINE);
+        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        sp.getViewport().setBackground(Theme.CARD);
         return sp;
     }
 }

@@ -9,11 +9,11 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
 
 /**
  * Review window shown after "Proceed": client details, ordered items, driver
@@ -21,16 +21,6 @@ import javax.swing.table.JTableHeader;
  * and a Confirm button that saves the booking and creates the receipt PDF.
  */
 public class BookingReviewDialog extends JDialog {
-
-    private static final Color DARK       = Color.decode("#45494D");
-    private static final Color DARK_LINE  = Color.decode("#5E6368");
-    private static final Color TEXT_LIGHT = Color.decode("#D1D5DB");
-    private static final Color BLUE       = Color.decode("#2563EB");
-    private static final Color HEADING    = Color.decode("#1E293B");
-    private static final Color BORDER_CLR = Color.decode("#555555");
-    private static final Color FIELD_BG   = Color.decode("#F4F6F8");
-    private static final Color RED        = Color.decode("#DC2626");
-    private static final Color GREEN      = Color.decode("#16A34A");
 
     private final DecimalFormat money = new DecimalFormat("#,##0.00");
     private final double grandTotal;
@@ -43,8 +33,8 @@ public class BookingReviewDialog extends JDialog {
     private final JTextField txtPaid = new JTextField();
     private final JLabel lblChange = new JLabel("0.00");
     private final JLabel lblStatus = new JLabel(" ");
-    private final JButton btnConfirm = new JButton("Confirm Booking");
-    private final JButton btnBack = new JButton("Back");
+    private final JButton btnConfirm = UiKit.primaryButton("Confirm Booking");
+    private final JButton btnBack = UiKit.secondaryButton("Back");
 
     /**
      * @param onSaved called after the booking is saved (e.g. to reload the product list)
@@ -67,56 +57,64 @@ public class BookingReviewDialog extends JDialog {
         }
         grandTotal = sum;
 
-        // Same size and position as the window that opened it
+        Rectangle bounds;
         if (owner != null) {
-            setSize(owner.getSize());
-            setLocation(owner.getLocation());
+            bounds = owner.getBounds();
         } else {
-            setSize(900, 600);
-            setLocationRelativeTo(null);
+            bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
         }
+        setBounds(bounds);
+        setMinimumSize(bounds.getSize());
+        setMaximumSize(bounds.getSize());
+        setResizable(false);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
-        JPanel root = new JPanel(new BorderLayout(0, 8));
-        root.setBackground(Color.WHITE);
-        root.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        JPanel root = new JPanel(new BorderLayout(0, 10));
+        root.setBackground(Theme.BACKGROUND);
+        root.setBorder(new EmptyBorder(14, 20, 16, 20));
         setContentPane(root);
 
-        // ---------- TOP: heading + client info + driver ----------
         JPanel top = new JPanel();
         top.setOpaque(false);
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
-
-        top.add(makeHeading("Review Booking", 26));
-        top.add(Box.createVerticalStrut(6));
+        top.add(makeHeading("Review booking", 24));
+        top.add(Box.createVerticalStrut(10));
 
         JPanel info = new JPanel(new GridLayout(2, 2, 10, 4));
-        info.setBackground(FIELD_BG);
-        info.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER_CLR),
-                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+        info.setOpaque(false);
         info.add(infoLabel("Client ID: ", clientId));
         info.add(infoLabel("Client Name: ", clientName));
         info.add(infoLabel("Address: ", address));
         info.add(infoLabel("Contact Number: ", contact));
-        info.setAlignmentX(Component.LEFT_ALIGNMENT);
-        top.add(info);
+        JPanel clientCard = new JPanel(new BorderLayout(0, 8));
+        clientCard.setBackground(Theme.CARD);
+        clientCard.setBorder(cardBorder());
+        clientCard.add(sectionHeading("Client details", "Confirm the customer information for this booking."),
+                BorderLayout.NORTH);
+        clientCard.add(info, BorderLayout.CENTER);
+        clientCard.setAlignmentX(Component.LEFT_ALIGNMENT);
+        top.add(clientCard);
         top.add(Box.createVerticalStrut(8));
 
-        JPanel driverRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        driverRow.setOpaque(false);
+        JPanel driverRow = new JPanel(new BorderLayout(12, 0));
+        driverRow.setBackground(Theme.CARD);
+        driverRow.setBorder(cardBorder());
         driverRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        driverRow.add(rowLabel("Assign Driver:"));
-        cmbDriver.setPreferredSize(new Dimension(320, 28));
-        cmbDriver.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        driverRow.add(cmbDriver);
+        driverRow.add(sectionHeading("Driver assignment", "Select an available driver for delivery."),
+                BorderLayout.WEST);
+        cmbDriver.setPreferredSize(new Dimension(320, 36));
+        cmbDriver.setFont(Theme.SUBTLE);
+        cmbDriver.setBackground(Theme.CARD);
+        cmbDriver.setForeground(Theme.TEXT);
+        cmbDriver.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        JPanel driverControl = new JPanel(new BorderLayout(0, 5));
+        driverControl.setOpaque(false);
+        driverControl.add(UiKit.caption("Assign driver"), BorderLayout.NORTH);
+        driverControl.add(cmbDriver, BorderLayout.CENTER);
+        driverRow.add(driverControl, BorderLayout.EAST);
         top.add(driverRow);
-        top.add(Box.createVerticalStrut(8));
-
-        top.add(makeHeading("Items to Order", 18));
         root.add(top, BorderLayout.NORTH);
 
-        // ---------- CENTER: items table ----------
         String[] cols = {"Product ID", "Product", "Price", "Amount", "Subtotal"};
         DefaultTableModel model = new DefaultTableModel(null, cols) {
             @Override
@@ -131,13 +129,19 @@ public class BookingReviewDialog extends JDialog {
         }
         JTable table = makeTable(model);
         JScrollPane sp = new JScrollPane(table);
-        sp.setBorder(BorderFactory.createLineBorder(BORDER_CLR));
-        sp.getViewport().setBackground(DARK_LINE);
-        root.add(sp, BorderLayout.CENTER);
+        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        sp.getViewport().setBackground(Theme.CARD);
+        JPanel itemsCard = new JPanel(new BorderLayout(0, 8));
+        itemsCard.setBackground(Theme.CARD);
+        itemsCard.setBorder(cardBorder());
+        itemsCard.add(sectionHeading("Items to order", "Review quantities and subtotals before confirming."),
+                BorderLayout.NORTH);
+        itemsCard.add(sp, BorderLayout.CENTER);
+        root.add(itemsCard, BorderLayout.CENTER);
 
-        // ---------- BOTTOM: totals, change calculator, buttons ----------
         JPanel bottom = new JPanel(new BorderLayout(10, 0));
-        bottom.setOpaque(false);
+        bottom.setBackground(Theme.CARD);
+        bottom.setBorder(cardBorder());
 
         JPanel calc = new JPanel(new GridBagLayout());
         calc.setOpaque(false);
@@ -147,19 +151,16 @@ public class BookingReviewDialog extends JDialog {
 
         JLabel lblTotal = new JLabel(money.format(grandTotal));
         lblTotal.setFont(new Font("SansSerif", Font.BOLD, 22));
-        lblTotal.setForeground(HEADING);
+        lblTotal.setForeground(Theme.TEXT);
 
         txtPaid.setPreferredSize(new Dimension(180, 30));
-        txtPaid.setBackground(FIELD_BG);
-        txtPaid.setFont(new Font("SansSerif", Font.PLAIN, 15));
-        txtPaid.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER_CLR),
-                BorderFactory.createEmptyBorder(0, 6, 0, 6)));
+        txtPaid.setBackground(Theme.CARD);
+        UiKit.styleField(txtPaid);
 
         lblChange.setFont(new Font("SansSerif", Font.BOLD, 22));
-        lblChange.setForeground(GREEN);
-        lblStatus.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        lblStatus.setForeground(RED);
+        lblChange.setForeground(Theme.OK);
+        lblStatus.setFont(Theme.SUBTLE);
+        lblStatus.setForeground(Theme.DANGER);
 
         g.gridx = 0; g.gridy = 0; calc.add(rowLabel("Total:"), g);
         g.gridx = 1;              calc.add(lblTotal, g);
@@ -170,12 +171,10 @@ public class BookingReviewDialog extends JDialog {
         g.gridx = 1; g.gridy = 3; calc.add(lblStatus, g);
         bottom.add(calc, BorderLayout.WEST);
 
-        styleButton(btnBack);
-        btnBack.setPreferredSize(new Dimension(100, 44));
+        btnBack.setPreferredSize(new Dimension(110, 42));
         btnBack.addActionListener(e -> dispose());
 
-        styleButton(btnConfirm);
-        btnConfirm.setPreferredSize(new Dimension(170, 44));
+        btnConfirm.setPreferredSize(new Dimension(180, 42));
         btnConfirm.addActionListener(e -> handleConfirm());
 
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -296,7 +295,7 @@ public class BookingReviewDialog extends JDialog {
         String text = txtPaid.getText().trim().replace(",", "");
         if (text.isEmpty()) {
             lblChange.setText("0.00");
-            lblChange.setForeground(GREEN);
+            lblChange.setForeground(Theme.OK);
             lblStatus.setText(" ");
             return;
         }
@@ -305,11 +304,11 @@ public class BookingReviewDialog extends JDialog {
             double change = paid - grandTotal;
             if (change < 0) {
                 lblChange.setText("0.00");
-                lblChange.setForeground(RED);
+                lblChange.setForeground(Theme.DANGER);
                 lblStatus.setText("Short by " + money.format(-change));
             } else {
                 lblChange.setText(money.format(change));
-                lblChange.setForeground(GREEN);
+                lblChange.setForeground(Theme.OK);
                 lblStatus.setText(" ");
             }
         } catch (NumberFormatException ex) {
@@ -322,13 +321,36 @@ public class BookingReviewDialog extends JDialog {
     private JLabel makeHeading(String text, int size) {
         JLabel l = new JLabel(text);
         l.setFont(new Font("SansSerif", Font.BOLD, size));
-        l.setForeground(HEADING);
+        l.setForeground(Theme.TEXT);
         l.setAlignmentX(Component.LEFT_ALIGNMENT);
         return l;
     }
 
     private JLabel infoLabel(String title, String value) {
-        return new JLabel("<html><b>" + title + "</b>" + escape(value) + "</html>");
+        JLabel label = new JLabel("<html><font color='#64748B'><b>" + title
+                + "</b></font>" + escape(value) + "</html>");
+        label.setFont(Theme.SUBTLE);
+        label.setForeground(Theme.TEXT);
+        return label;
+    }
+
+    private JPanel sectionHeading(String titleText, String subtitleText) {
+        JPanel heading = new JPanel(new BorderLayout(0, 3));
+        heading.setOpaque(false);
+        JLabel title = new JLabel(titleText);
+        title.setFont(new Font("SansSerif", Font.BOLD, 16));
+        title.setForeground(Theme.TEXT);
+        JLabel subtitle = new JLabel(subtitleText);
+        subtitle.setFont(Theme.SUBTLE);
+        subtitle.setForeground(Theme.MUTED);
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(subtitle, BorderLayout.SOUTH);
+        return heading;
+    }
+
+    private javax.swing.border.Border cardBorder() {
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(12, 14, 12, 14));
     }
 
     private String escape(String s) {
@@ -338,57 +360,45 @@ public class BookingReviewDialog extends JDialog {
 
     private JLabel rowLabel(String text) {
         JLabel l = new JLabel(text);
-        l.setFont(new Font("SansSerif", Font.PLAIN, 15));
-        l.setForeground(Color.decode("#222222"));
+        l.setFont(Theme.SUBTLE);
+        l.setForeground(Theme.MUTED);
         return l;
-    }
-
-    private void styleButton(JButton b) {
-        b.setBackground(BLUE);
-        b.setForeground(Color.WHITE);
-        b.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        b.setFocusable(false);
-        b.setOpaque(true);
-        b.setContentAreaFilled(true);
-        b.setBorder(BorderFactory.createLineBorder(HEADING));
     }
 
     private JTable makeTable(DefaultTableModel model) {
         JTable t = new JTable(model);
-        t.setRowHeight(25);
-        t.setBackground(DARK);
-        t.setForeground(TEXT_LIGHT);
-        t.setSelectionBackground(BLUE);
-        t.setSelectionForeground(Color.WHITE);
-        t.setShowGrid(false);
-        t.setIntercellSpacing(new Dimension(0, 0));
+        t.setRowHeight(32);
+        t.setBackground(Theme.CARD);
+        t.setForeground(Theme.TEXT);
+        t.setSelectionBackground(Color.decode("#DBEAFE"));
+        t.setSelectionForeground(Theme.TEXT);
+        t.setShowVerticalLines(false);
+        t.setGridColor(Theme.BORDER);
+        t.setIntercellSpacing(new Dimension(0, 1));
         t.setFillsViewportHeight(true);
-        t.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        t.setFont(Theme.SUBTLE);
         t.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
 
-        DefaultTableCellRenderer cell = new DefaultTableCellRenderer();
-        cell.setHorizontalAlignment(SwingConstants.LEFT);
-        cell.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
-        t.setDefaultRenderer(Object.class, cell);
-
-        JTableHeader header = t.getTableHeader();
-        header.setReorderingAllowed(false);
-        header.setResizingAllowed(false);
-        header.setPreferredSize(new Dimension(100, 32));
-        header.setDefaultRenderer(new DefaultTableCellRenderer() {
+        t.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
-            public Component getTableCellRendererComponent(JTable table, Object value,
-                                                           boolean isSelected, boolean hasFocus, int row, int column) {
-                super.getTableCellRendererComponent(table, value, false, false, row, column);
-                setHorizontalAlignment(SwingConstants.CENTER);
-                setBackground(DARK);
-                setForeground(TEXT_LIGHT);
-                setFont(new Font("SansSerif", Font.PLAIN, 13));
-                setOpaque(true);
-                setBorder(BorderFactory.createMatteBorder(0, 0, 1, 1, DARK_LINE));
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
+                                                           boolean focus, int row, int column) {
+                super.getTableCellRendererComponent(table, value, selected, false, row, column);
+                setFont(Theme.SUBTLE);
+                setForeground(Theme.TEXT);
+                setBorder(new EmptyBorder(0, 8, 0, 8));
                 return this;
             }
         });
+        DefaultTableCellRenderer header = new DefaultTableCellRenderer();
+        header.setHorizontalAlignment(SwingConstants.LEFT);
+        header.setBackground(Color.decode("#F8FAFC"));
+        header.setForeground(Theme.MUTED);
+        header.setFont(new Font("SansSerif", Font.BOLD, 12));
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
+        t.getTableHeader().setDefaultRenderer(header);
+        t.getTableHeader().setReorderingAllowed(false);
+        t.getTableHeader().setPreferredSize(new Dimension(100, 34));
         return t;
     }
 }

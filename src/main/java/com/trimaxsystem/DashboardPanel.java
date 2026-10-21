@@ -1,109 +1,77 @@
 package com.trimaxsystem;
 
 import java.awt.*;
+import java.awt.geom.Arc2D;
+import java.awt.geom.Area;
+import java.awt.geom.Ellipse2D;
 import java.math.BigDecimal;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 
 /**
- * Admin Dashboard: summary cards + Today's Booking Summary, Active Deliveries,
- * Driver Status and Recent Activity. Refreshes on open, via the Refresh
- * button, and every 30 seconds while the panel is showing.
+ * Admin Dashboard. Everything on it comes from the database; a section that cannot be loaded says
+ * "Unavailable" instead of showing zero.
  *
- * Cards whose sql is null are not tracked by the current database schema and
- * show "N/A". Put a query in CARDS later and they will start working.
+ * KPI definitions (all counts are of rows in the bookings table):
+ *   - Total Bookings: every booking, whatever its status. It is the sum of the status counts below,
+ *     so no booking is counted twice.
+ *   - Pending / Confirmed / In Progress / Completed / Cancelled: bookings whose status is exactly that value.
+ *   - Booking Trends: bookings CREATED per day (all statuses), days counted in {@link #BUSINESS_TZ}.
+ *   - Today's Revenue: sum of total_amount of bookings created today, excluding Cancelled.
+ *   - Active Drivers / Agents: users with that role and account_status = 'Active'.
+ *
+ * Refreshes on open, via the Refresh button, and every 30 seconds while the panel is showing.
  */
 public class DashboardPanel extends JPanel {
 
-    private static final Color DARK       = Color.decode("#45494D");
-    private static final Color DARK_LINE  = Color.decode("#5E6368");
-    private static final Color TEXT_LIGHT = Color.decode("#D1D5DB");
-    private static final Color BLUE       = Color.decode("#2563EB");
-    private static final Color HEADING    = Color.decode("#1E293B");
-    private static final Color BORDER_CLR = Color.decode("#555555");
-    private static final Color FIELD_BG   = Color.decode("#F4F6F8");
-    private static final Color MUTED      = Color.decode("#6B7280");
-    private static final Color RED        = Color.decode("#DC2626");
+    /** Day boundaries ("today", chart days) follow this time zone, not the database server's. */
+    private static final ZoneId BUSINESS_TZ = ZoneId.of("Asia/Manila");
+    private static final String TZ_SQL = "Asia/Manila";
+
+    /** Canonical booking statuses (bookings.status CHECK constraint), in display order. */
+    private static final String[] STATUSES = {"Pending", "Confirmed", "In Progress", "Completed", "Cancelled"};
 
     private static final int REFRESH_MS = 30_000;
+    private static final String PESO = "₱";
+    private static final String UNAVAILABLE = "Unavailable";
 
-    // Shared SQL fragments
-    private static final String DRIVER_JOIN =
-            "FROM users u JOIN roles r ON r.role_id = u.role_id WHERE r.role_name = 'Driver' ";
+    // ---------- SQL ----------
+    private static final String SQL_STATUS_COUNTS =
+            "SELECT status, COUNT(*) FROM bookings GROUP BY status";
 
-    /** One dashboard card. sql = null means "not available in the current schema". */
-    private static final class Card {
-        final String label;
-        final String sql;
-        final boolean money;
+    private static final String SQL_TREND =
+            "SELECT (transc_date AT TIME ZONE '" + TZ_SQL + "')::date AS d, COUNT(*) "
+                    + "FROM bookings WHERE (transc_date AT TIME ZONE '" + TZ_SQL + "')::date >= ? "
+                    + "GROUP BY d ORDER BY d";
 
-        Card(String label, String sql, boolean money) {
-            this.label = label;
-            this.sql = sql;
-            this.money = money;
-        }
-    }
-
-    private static final Card[] CARDS = {
-            new Card("Total Bookings",
-                    "SELECT COUNT(*) FROM bookings", false),
-            new Card("Pending Bookings",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Pending'", false),
-            new Card("Confirmed Bookings",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Confirmed'", false),
-            new Card("Assigned Bookings",
-                    "SELECT COUNT(*) FROM bookings WHERE driver_username IS NOT NULL "
-                            + "AND status IN ('Pending', 'Confirmed', 'In Progress')", false),
-            new Card("In Progress",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'In Progress'", false),
-            // No completed-at column: uses the booking date.
-            new Card("Completed Today",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Completed' "
-                            + "AND transc_date::date = CURRENT_DATE", false),
-            new Card("Declined Bookings", null, false),
-            new Card("Cancelled Bookings",
-                    "SELECT COUNT(*) FROM bookings WHERE status = 'Cancelled'", false),
-            new Card("Failed Deliveries", null, false),
-            new Card("Active Drivers",
-                    "SELECT COUNT(*) " + DRIVER_JOIN + "AND u.account_status = 'Active'", false),
-            // No login tracking: "online" = active driver whose vehicle is Available or On Delivery.
-            new Card("Online Drivers",
-                    "SELECT COUNT(DISTINCT u.username) " + DRIVER_JOIN + "AND u.account_status = 'Active' "
-                            + "AND EXISTS (SELECT 1 FROM vehicles v WHERE v.username = u.username "
-                            + "AND v.status IN ('Available', 'On Delivery'))", false),
-            new Card("Offline Drivers",
-                    "SELECT COUNT(*) " + DRIVER_JOIN + "AND u.account_status = 'Active' "
-                            + "AND NOT EXISTS (SELECT 1 FROM vehicles v WHERE v.username = u.username "
-                            + "AND v.status IN ('Available', 'On Delivery'))", false),
-            // Riders = every user with the Driver role, any account status.
-            new Card("Registered Riders",
-                    "SELECT COUNT(*) " + DRIVER_JOIN, false),
-            new Card("Total Customers",
-                    "SELECT COUNT(*) FROM clients", false),
-            new Card("Today's Revenue",
-                    "SELECT COALESCE(SUM(total_amount), 0) FROM bookings "
-                            + "WHERE transc_date::date = CURRENT_DATE AND status <> 'Cancelled'", true),
-            new Card("Pending Problems", null, false)
-    };
-
-    private static final String SQL_TODAY =
-            "SELECT b.booking_id, c.client_name, b.total_amount, b.status, to_char(b.transc_date, 'HH24:MI') "
+    private static final String SQL_RECENT =
+            "SELECT b.booking_id, c.client_name, "
+                    + "to_char(b.transc_date AT TIME ZONE '" + TZ_SQL + "', 'Mon DD, YYYY HH24:MI'), "
+                    + "b.status, b.total_amount "
                     + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
-                    + "WHERE b.transc_date::date = CURRENT_DATE ORDER BY b.transc_date DESC";
+                    + "ORDER BY b.transc_date DESC LIMIT 8";
 
     private static final String SQL_ACTIVE =
-            "SELECT b.booking_id, c.client_name, c.address, COALESCE(u.name, '-'), COALESCE(b.vehicle_id, '-') "
+            "SELECT b.booking_id, c.client_name, COALESCE(u.name, '-'), COALESCE(b.vehicle_id, '-') "
                     + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
                     + "LEFT JOIN users u ON u.username = b.driver_username "
                     + "WHERE b.status = 'In Progress' ORDER BY b.transc_date";
@@ -114,89 +82,112 @@ public class DashboardPanel extends JPanel {
                     + "LEFT JOIN vehicles v ON v.username = u.username "
                     + "WHERE r.role_name = 'Driver' AND u.account_status = 'Active' ORDER BY u.username";
 
-    private static final String SQL_RECENT =
-            "SELECT to_char(b.transc_date, 'YYYY-MM-DD HH24:MI'), "
-                    + "'Booking #' || b.booking_id || ' for ' || c.client_name, b.status "
-                    + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
-                    + "ORDER BY b.transc_date DESC LIMIT 10";
+    private static final String SQL_CUSTOMERS = "SELECT COUNT(*) FROM clients";
 
+    private static final String SQL_ACTIVE_BY_ROLE =
+            "SELECT COUNT(*) FROM users u JOIN roles r ON r.role_id = u.role_id "
+                    + "WHERE r.role_name = ? AND u.account_status = 'Active'";
+
+    private static final String SQL_REVENUE_TODAY =
+            "SELECT COALESCE(SUM(total_amount), 0) FROM bookings "
+                    + "WHERE (transc_date AT TIME ZONE '" + TZ_SQL + "')::date = ? AND status <> 'Cancelled'";
+
+    // ---------- state ----------
     private final DecimalFormat money = new DecimalFormat("#,##0.00");
-    private final JLabel[] cardValues = new JLabel[CARDS.length];
     private final JLabel lblUpdated = new JLabel(" ");
 
-    private final DefaultTableModel todayModel  = readOnlyModel("Booking ID", "Client", "Total", "Status", "Time");
-    private final DefaultTableModel activeModel = readOnlyModel("Booking ID", "Client", "Address", "Driver", "Vehicle");
-    private final DefaultTableModel driverModel = readOnlyModel("Username", "Driver", "Vehicle", "Status");
-    private final DefaultTableModel recentModel = readOnlyModel("Date / Time", "Activity", "Status");
+    private final JLabel[] kpiValues = new JLabel[1 + STATUSES.length];   // Total + one per status
+    private final BarChart trendChart = new BarChart();
+    private final DonutChart donut = new DonutChart();
+    private final JPanel legend = new JPanel();
 
+    private final DefaultTableModel recentModel = readOnlyModel("Booking", "Customer", "Date / Time", "Status", "Amount");
+    private final DefaultTableModel activeModel = readOnlyModel("Booking", "Customer", "Driver", "Vehicle");
+    private final DefaultTableModel driverModel = readOnlyModel("Username", "Driver", "Vehicle", "Vehicle status");
+    private final JLabel[] quickValues = new JLabel[4];
+
+    private boolean monthView = false;
     private final Timer timer;
+    private Runnable onFirstLoad;   // called once, after the first refresh finishes (success or failure)
 
-    /** Everything fetched from the database in one refresh. */
+    /** Everything fetched from the database in one refresh. A false *Ok flag means "Unavailable". */
     private static final class Snapshot {
-        final String[] cards = new String[CARDS.length];
-        List<Object[]> today, active, drivers, recent;
+        boolean statusOk, trendOk, recentOk, activeOk, driversOk, quickOk;
+        Map<String, Long> statusCounts = new LinkedHashMap<>();
+        String[] trendLabels = new String[0];
+        long[] trendValues = new long[0];
+        String trendCaption = "";
+        List<Object[]> recent = new ArrayList<>(), active = new ArrayList<>(), drivers = new ArrayList<>();
+        String[] quick = new String[4];
+    }
+
+    private interface Task {
+        void run() throws SQLException;
+    }
+
+    /** Runs one section's queries; a failure only marks that section unavailable. */
+    private static boolean attempt(Task t) {
+        try {
+            t.run();
+            return true;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public DashboardPanel() {
-        setBackground(Color.WHITE);
-        setLayout(new BorderLayout(0, 8));
-        setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        this(null);
+    }
 
-        // ---------- HEADER ----------
-        JPanel header = new JPanel(new BorderLayout());
-        header.setOpaque(false);
-        header.add(makeHeading("Admin Dashboard", 26), BorderLayout.WEST);
+    public DashboardPanel(Runnable onFirstLoad) {
+        this.onFirstLoad = onFirstLoad;
+        setBackground(Theme.BACKGROUND);
+        setLayout(new BorderLayout());
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
-        right.setOpaque(false);
-        lblUpdated.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        lblUpdated.setForeground(MUTED);
-        JButton btnRefresh = new JButton("Refresh");
-        btnRefresh.setPreferredSize(new Dimension(100, 32));
-        btnRefresh.setBackground(BLUE);
-        btnRefresh.setForeground(Color.WHITE);
-        btnRefresh.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        btnRefresh.setFocusable(false);
-        btnRefresh.setOpaque(true);
-        btnRefresh.setContentAreaFilled(true);
-        btnRefresh.setBorder(BorderFactory.createLineBorder(HEADING));
+        // ---------- TOP BAR: last updated + refresh (the page title is in the main window header) ----------
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 8));
+        bar.setOpaque(false);
+        lblUpdated.setFont(Theme.SUBTLE);
+        lblUpdated.setForeground(Theme.MUTED);
+        JButton btnRefresh = primaryButton("Refresh");
         btnRefresh.addActionListener(e -> refresh());
-        right.add(lblUpdated);
-        right.add(btnRefresh);
-        header.add(right, BorderLayout.EAST);
-        add(header, BorderLayout.NORTH);
+        bar.add(lblUpdated);
+        bar.add(btnRefresh);
+        add(bar, BorderLayout.NORTH);
 
         // ---------- CONTENT (scrolls if the window is small) ----------
-        ScrollablePanel content = new ScrollablePanel(new BorderLayout(0, 12));
-        content.setBackground(Color.WHITE);
+        ScrollablePanel content = new ScrollablePanel(new GridBagLayout());
+        content.setBackground(Theme.BACKGROUND);
+        content.setBorder(new EmptyBorder(0, 20, 20, 20));
 
-        // Cards: 4 columns
-        JPanel cards = new JPanel(new GridLayout(0, 4, 10, 10));
-        cards.setOpaque(false);
-        for (int i = 0; i < CARDS.length; i++) {
-            cards.add(makeCard(i));
-        }
-        content.add(cards, BorderLayout.NORTH);
+        GridBagConstraints g = new GridBagConstraints();
+        g.gridx = 0;
+        g.fill = GridBagConstraints.BOTH;
+        g.weightx = 1;
+        g.insets = new Insets(0, 0, 14, 0);
 
-        // Sections: 2 x 2
-        JPanel sections = new JPanel(new GridLayout(2, 2, 12, 12));
-        sections.setOpaque(false);
-        sections.setPreferredSize(new Dimension(100, 480));
-        sections.add(makeSection("Today's Booking Summary", todayModel));
-        sections.add(makeSection("Active Deliveries", activeModel));
-        sections.add(makeSection("Driver Status", driverModel));
-        sections.add(makeSection("Recent Activity", recentModel));
-        content.add(sections, BorderLayout.CENTER);
+        g.gridy = 0;
+        content.add(buildKpiRow(), g);
+        g.gridy = 1;
+        content.add(twoColumns(buildTrendCard(), buildStatusCard(), 0.62), g);
+        g.gridy = 2;
+        content.add(twoColumns(buildRecentCard(), buildActiveCard(), 0.62), g);
+        g.gridy = 3;
+        g.insets = new Insets(0, 0, 0, 0);
+        content.add(twoColumns(buildDriversCard(), buildQuickStatsCard(), 0.62), g);
 
         JScrollPane scroll = new JScrollPane(content);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-        scroll.getViewport().setBackground(Color.WHITE);
+        scroll.getViewport().setBackground(Theme.BACKGROUND);
         add(scroll, BorderLayout.CENTER);
+
+        trendChart.setMessage("Loading...");
+        donut.setMessage("Loading...");
 
         // Auto-refresh only while the panel is actually on screen
         timer = new Timer(REFRESH_MS, e -> refresh());
-
         refresh();
     }
 
@@ -212,61 +203,126 @@ public class DashboardPanel extends JPanel {
         super.removeNotify();
     }
 
-    // ---------- LOADING ----------
+    // =====================================================
+    // LOADING
+    // =====================================================
 
-    /** Reloads all cards and tables in the background. */
+    /** Reloads every section in the background. */
     public void refresh() {
+        final boolean month = monthView;
         new SwingWorker<Snapshot, Void>() {
             @Override
             protected Snapshot doInBackground() throws Exception {
-                return fetch();
+                return fetch(month);
             }
 
             @Override
             protected void done() {
                 try {
-                    apply(get());
-                    lblUpdated.setForeground(MUTED);
-                    lblUpdated.setText("Last updated: " + new SimpleDateFormat("HH:mm:ss").format(new Date()));
+                    Snapshot s = get();
+                    apply(s);
+                    boolean all = s.statusOk && s.trendOk && s.recentOk && s.activeOk && s.driversOk && s.quickOk;
+                    if (all) {
+                        lblUpdated.setForeground(Theme.MUTED);
+                        lblUpdated.setText("Last updated: " + new SimpleDateFormat("HH:mm:ss").format(new Date()));
+                    } else {
+                        lblUpdated.setForeground(Theme.DANGER);
+                        lblUpdated.setText("Some sections could not be loaded. Press Refresh to retry.");
+                    }
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    lblUpdated.setForeground(RED);
-                    lblUpdated.setText("Could not refresh: " + cause.getMessage());
+                    apply(new Snapshot());   // every flag false: all sections show "Unavailable"
+                    lblUpdated.setForeground(Theme.DANGER);
+                    lblUpdated.setText("Could not reach the database: " + cause.getMessage());
                     ex.printStackTrace();
+                }
+                if (onFirstLoad != null) {
+                    Runnable r = onFirstLoad;
+                    onFirstLoad = null;
+                    r.run();
                 }
             }
         }.execute();
     }
 
-    private Snapshot fetch() throws SQLException {
+    private Snapshot fetch(boolean month) throws SQLException {
         Snapshot s = new Snapshot();
+        LocalDate today = LocalDate.now(BUSINESS_TZ);
         try (Connection conn = DatabaseConnection.getConnection()) {
-            for (int i = 0; i < CARDS.length; i++) {
-                Card c = CARDS[i];
-                if (c.sql == null) {
-                    s.cards[i] = "N/A";
-                    continue;
+
+            s.statusOk = attempt(() -> {
+                Map<String, Long> raw = new LinkedHashMap<>();
+                try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(SQL_STATUS_COUNTS)) {
+                    while (rs.next()) raw.put(rs.getString(1), rs.getLong(2));
                 }
-                try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(c.sql)) {
-                    rs.next();
-                    if (c.money) {
-                        BigDecimal v = rs.getBigDecimal(1);
-                        s.cards[i] = money.format(v == null ? BigDecimal.ZERO : v);
-                    } else {
-                        s.cards[i] = String.valueOf(rs.getLong(1));
+                for (String status : STATUSES) {            // canonical statuses first, in order
+                    s.statusCounts.put(status, raw.getOrDefault(status, 0L));
+                }
+                for (Map.Entry<String, Long> e : raw.entrySet()) {   // anything else, shown as stored
+                    if (!s.statusCounts.containsKey(e.getKey())) s.statusCounts.put(e.getKey(), e.getValue());
+                }
+            });
+
+            s.trendOk = attempt(() -> {
+                LocalDate start = month ? today.withDayOfMonth(1) : today.minusDays(6);
+                int days = (int) (today.toEpochDay() - start.toEpochDay()) + 1;
+                s.trendLabels = new String[days];
+                s.trendValues = new long[days];
+                for (int i = 0; i < days; i++) {
+                    LocalDate d = start.plusDays(i);
+                    s.trendLabels[i] = month ? String.valueOf(d.getDayOfMonth())
+                            : d.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH);
+                }
+                try (PreparedStatement ps = conn.prepareStatement(SQL_TREND)) {
+                    ps.setDate(1, java.sql.Date.valueOf(start));
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            int idx = (int) (rs.getDate(1).toLocalDate().toEpochDay() - start.toEpochDay());
+                            if (idx >= 0 && idx < days) s.trendValues[idx] = rs.getLong(2);
+                        }
                     }
                 }
-            }
-            s.today   = rows(conn, SQL_TODAY, 5, 3);
-            s.active  = rows(conn, SQL_ACTIVE, 5, -1);
-            s.drivers = rows(conn, SQL_DRIVERS, 4, -1);
-            s.recent  = rows(conn, SQL_RECENT, 3, -1);
+                s.trendCaption = (month ? "This month, " : "Last 7 days, ") + "bookings created per day (all statuses). "
+                        + "Days in Asia/Manila time (UTC+8).";
+            });
+
+            s.recentOk = attempt(() -> s.recent = rows(conn, SQL_RECENT, 5, 5, true));
+            s.activeOk = attempt(() -> s.active = rows(conn, SQL_ACTIVE, 4, -1, true));
+            s.driversOk = attempt(() -> s.drivers = rows(conn, SQL_DRIVERS, 4, -1, false));
+
+            s.quickOk = attempt(() -> {
+                s.quick[0] = scalar(conn, SQL_CUSTOMERS, null);
+                s.quick[1] = scalar(conn, SQL_ACTIVE_BY_ROLE, "Driver");
+                s.quick[2] = scalar(conn, SQL_ACTIVE_BY_ROLE, "Agent");
+                try (PreparedStatement ps = conn.prepareStatement(SQL_REVENUE_TODAY)) {
+                    ps.setDate(1, java.sql.Date.valueOf(today));
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        BigDecimal v = rs.getBigDecimal(1);
+                        s.quick[3] = PESO + " " + money.format(v == null ? BigDecimal.ZERO : v);
+                    }
+                }
+            });
         }
         return s;
     }
 
-    /** Reads rows as strings. moneyCol (1-based) is formatted as money, or -1 for none. */
-    private List<Object[]> rows(Connection conn, String sql, int cols, int moneyCol) throws SQLException {
+    private static String scalar(Connection conn, String sql, String param) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (param != null) ps.setString(1, param);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return String.valueOf(rs.getLong(1));
+            }
+        }
+    }
+
+    /**
+     * Reads rows as strings. moneyCol (1-based) is formatted as money, or -1 for none.
+     * With bookingIdFirst, column 1 is a booking id and is shown as "#123".
+     */
+    private List<Object[]> rows(Connection conn, String sql, int cols, int moneyCol,
+                                boolean bookingIdFirst) throws SQLException {
         List<Object[]> list = new ArrayList<>();
         try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
@@ -274,7 +330,9 @@ public class DashboardPanel extends JPanel {
                 for (int i = 1; i <= cols; i++) {
                     if (i == moneyCol) {
                         BigDecimal v = rs.getBigDecimal(i);
-                        row[i - 1] = v == null ? "" : money.format(v);
+                        row[i - 1] = v == null ? "" : PESO + " " + money.format(v);
+                    } else if (i == 1 && bookingIdFirst) {
+                        row[i - 1] = "#" + rs.getString(i);   // booking id
                     } else {
                         row[i - 1] = rs.getString(i);
                     }
@@ -285,71 +343,273 @@ public class DashboardPanel extends JPanel {
         return list;
     }
 
+    // =====================================================
+    // SHOWING THE DATA
+    // =====================================================
+
     private void apply(Snapshot s) {
-        for (int i = 0; i < CARDS.length; i++) {
-            cardValues[i].setText(s.cards[i]);
+        // KPI cards
+        if (s.statusOk) {
+            long total = 0;
+            for (long v : s.statusCounts.values()) total += v;
+            kpiValues[0].setText(String.valueOf(total));
+            for (int i = 0; i < STATUSES.length; i++) {
+                kpiValues[i + 1].setText(String.valueOf(s.statusCounts.get(STATUSES[i])));
+            }
+        } else {
+            for (JLabel l : kpiValues) l.setText(UNAVAILABLE);
         }
-        fill(todayModel, s.today);
-        fill(activeModel, s.active);
-        fill(driverModel, s.drivers);
-        fill(recentModel, s.recent);
+        for (JLabel l : kpiValues) {
+            l.setFont(l.getText().equals(UNAVAILABLE) ? new Font("SansSerif", Font.BOLD, 15) : KPI_FONT);
+        }
+
+        // Trend chart
+        if (s.trendOk) trendChart.setData(s.trendLabels, s.trendValues, s.trendCaption);
+        else trendChart.setMessage(UNAVAILABLE);
+
+        // Status donut + legend
+        legend.removeAll();
+        if (s.statusOk) {
+            donut.setData(s.statusCounts);
+            long total = 0;
+            for (long v : s.statusCounts.values()) total += v;
+            for (Map.Entry<String, Long> e : s.statusCounts.entrySet()) {
+                double pct = total == 0 ? 0 : e.getValue() * 100.0 / total;
+                JLabel row = new JLabel(e.getKey() + "   " + e.getValue() + "  (" + String.format(Locale.ENGLISH, "%.1f", pct) + "%)");
+                row.setIcon(new DotIcon(Theme.statusColor(e.getKey())));
+                row.setIconTextGap(8);
+                row.setFont(Theme.SUBTLE);
+                row.setForeground(Theme.TEXT);
+                row.setBorder(new EmptyBorder(3, 0, 3, 0));
+                legend.add(row);
+            }
+        } else {
+            donut.setMessage(UNAVAILABLE);
+        }
+        legend.revalidate();
+        legend.repaint();
+
+        // Tables
+        fill(recentModel, s.recentOk, s.recent, "No bookings yet.");
+        fill(activeModel, s.activeOk, s.active, "No bookings are in progress.");
+        fill(driverModel, s.driversOk, s.drivers, "No active drivers.");
+
+        // Quick stats
+        for (int i = 0; i < quickValues.length; i++) {
+            quickValues[i].setText(s.quickOk ? s.quick[i] : UNAVAILABLE);
+        }
     }
 
-    private void fill(DefaultTableModel model, List<Object[]> rows) {
+    private void fill(DefaultTableModel model, boolean ok, List<Object[]> rows, String emptyText) {
         model.setRowCount(0);
-        for (Object[] r : rows) {
-            model.addRow(r);
+        int cols = model.getColumnCount();
+        if (!ok || rows.isEmpty()) {
+            Object[] msg = new Object[cols];
+            msg[0] = ok ? emptyText : UNAVAILABLE + " - could not load.";
+            model.addRow(msg);
+            return;
         }
+        for (Object[] r : rows) model.addRow(r);
     }
 
-    // ---------- BUILDING THE UI ----------
-    private JPanel makeCard(int index) {
-        Card c = CARDS[index];
+    // =====================================================
+    // BUILDING THE UI
+    // =====================================================
 
-        JPanel card = new JPanel(new BorderLayout());
-        card.setBackground(FIELD_BG);
-        card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER_CLR),
-                BorderFactory.createCompoundBorder(
-                        BorderFactory.createMatteBorder(0, 4, 0, 0, BLUE),
-                        BorderFactory.createEmptyBorder(8, 10, 8, 10))));
+    private static final Font KPI_FONT = new Font("SansSerif", Font.BOLD, 28);
 
-        JLabel value = new JLabel("...");
-        value.setFont(new Font("SansSerif", Font.BOLD, 24));
-        value.setForeground(c.sql == null ? MUTED : HEADING);
-        cardValues[index] = value;
+    private JComponent buildKpiRow() {
+        String[] labels = {"Total Bookings", "Pending", "Confirmed", "In Progress", "Completed", "Cancelled"};
+        Color[] accents = {Theme.NAVY, Theme.statusColor("Pending"), Theme.statusColor("Confirmed"),
+                Theme.statusColor("In Progress"), Theme.statusColor("Completed"), Theme.statusColor("Cancelled")};
+        String[] tips = {
+                "Every booking, whatever its status.",
+                "Bookings with status Pending.",
+                "Bookings with status Confirmed.",
+                "Bookings with status In Progress.",
+                "Bookings with status Completed.",
+                "Bookings with status Cancelled."};
 
-        JLabel title = new JLabel(c.label);
-        title.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        title.setForeground(Color.decode("#222222"));
+        JPanel row = new JPanel(new GridLayout(1, labels.length, 12, 0));
+        row.setOpaque(false);
+        for (int i = 0; i < labels.length; i++) {
+            JLabel value = new JLabel("...");
+            value.setFont(KPI_FONT);
+            value.setForeground(Theme.TEXT);
+            kpiValues[i] = value;
 
-        if (c.sql == null) {
-            card.setToolTipText("Not tracked in the current database.");
+            JLabel title = new JLabel(labels[i]);
+            title.setFont(new Font("SansSerif", Font.BOLD, 13));
+            title.setForeground(Theme.MUTED);
+            JLabel sub = new JLabel("All time");
+            sub.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            sub.setForeground(Theme.MUTED);
+
+            JPanel card = new JPanel(new BorderLayout(0, 4));
+            card.setBackground(Theme.CARD);
+            card.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER),
+                    BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(4, 0, 0, 0, accents[i]),
+                            new EmptyBorder(10, 14, 10, 14))));
+            card.add(title, BorderLayout.NORTH);
+            card.add(value, BorderLayout.CENTER);
+            card.add(sub, BorderLayout.SOUTH);
+            card.setToolTipText(tips[i]);
+            row.add(card);
         }
-
-        card.add(value, BorderLayout.CENTER);
-        card.add(title, BorderLayout.SOUTH);
-        return card;
+        return row;
     }
 
-    private JPanel makeSection(String title, DefaultTableModel model) {
-        JPanel p = new JPanel(new BorderLayout(0, 4));
-        p.setOpaque(false);
-        p.add(makeHeading(title, 16), BorderLayout.NORTH);
+    private JComponent buildTrendCard() {
+        JToggleButton week = toggle("Last 7 days", true);
+        JToggleButton month = toggle("This month", false);
+        ButtonGroup group = new ButtonGroup();
+        group.add(week);
+        group.add(month);
+        week.addActionListener(e -> { monthView = false; refresh(); });
+        month.addActionListener(e -> { monthView = true; refresh(); });
 
-        JTable table = makeTable(model);
-        JScrollPane sp = new JScrollPane(table);
-        sp.setBorder(BorderFactory.createLineBorder(BORDER_CLR));
-        sp.getViewport().setBackground(DARK_LINE);
-        p.add(sp, BorderLayout.CENTER);
+        JPanel toggles = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        toggles.setOpaque(false);
+        toggles.add(week);
+        toggles.add(month);
+
+        trendChart.setPreferredSize(new Dimension(400, 260));
+        return card("Booking Trends", toggles, trendChart);
+    }
+
+    private JComponent buildStatusCard() {
+        legend.setOpaque(false);
+        legend.setLayout(new BoxLayout(legend, BoxLayout.Y_AXIS));
+        donut.setPreferredSize(new Dimension(190, 190));
+
+        JPanel body = new JPanel(new BorderLayout(14, 0));
+        body.setOpaque(false);
+        body.add(donut, BorderLayout.WEST);
+        JPanel legendHolder = new JPanel(new GridBagLayout());   // centres the legend vertically
+        legendHolder.setOpaque(false);
+        legendHolder.add(legend);
+        body.add(legendHolder, BorderLayout.CENTER);
+        return card("Booking Status", null, body);
+    }
+
+    private JComponent buildRecentCard() {
+        return card("Recent Bookings", null, tableScroll(makeTable(recentModel, 3, 4)));
+    }
+
+    private JComponent buildActiveCard() {
+        return card("Active Deliveries (In Progress)", null, tableScroll(makeTable(activeModel, -1, -1)));
+    }
+
+    private JComponent buildDriversCard() {
+        return card("Driver Status", null, tableScroll(makeTable(driverModel, -1, -1)));
+    }
+
+    private JComponent buildQuickStatsCard() {
+        String[] labels = {"Total Customers", "Active Drivers", "Active Agents", "Today's Revenue"};
+        String[] tips = {
+                "Rows in the clients table.",
+                "Users with the Driver role and an Active account.",
+                "Users with the Agent role and an Active account.",
+                "Total of bookings created today (Asia/Manila), excluding Cancelled."};
+        JPanel grid = new JPanel(new GridLayout(2, 2, 10, 10));
+        grid.setOpaque(false);
+        for (int i = 0; i < labels.length; i++) {
+            JLabel title = new JLabel(labels[i]);
+            title.setFont(Theme.SUBTLE);
+            title.setForeground(Theme.MUTED);
+            JLabel value = new JLabel("...");
+            value.setFont(new Font("SansSerif", Font.BOLD, 20));
+            value.setForeground(Theme.TEXT);
+            quickValues[i] = value;
+
+            JPanel cell = new JPanel(new BorderLayout(0, 4));
+            cell.setBackground(Theme.BACKGROUND);
+            cell.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(10, 12, 10, 12)));
+            cell.add(title, BorderLayout.NORTH);
+            cell.add(value, BorderLayout.CENTER);
+            cell.setToolTipText(tips[i]);
+            grid.add(cell);
+        }
+        return card("Quick Stats", null, grid);
+    }
+
+    /** A white rounded-looking card with a title (and optional controls) on top. */
+    private JPanel card(String title, JComponent headerRight, JComponent body) {
+        JLabel t = new JLabel(title);
+        t.setFont(new Font("SansSerif", Font.BOLD, 16));
+        t.setForeground(Theme.TEXT);
+
+        JPanel head = new JPanel(new BorderLayout());
+        head.setOpaque(false);
+        head.setBorder(new EmptyBorder(0, 0, 10, 0));
+        head.add(t, BorderLayout.WEST);
+        if (headerRight != null) head.add(headerRight, BorderLayout.EAST);
+
+        JPanel p = new JPanel(new BorderLayout());
+        p.setBackground(Theme.CARD);
+        p.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(14, 16, 14, 16)));
+        p.add(head, BorderLayout.NORTH);
+        p.add(body, BorderLayout.CENTER);
         return p;
     }
 
-    private JLabel makeHeading(String text, int size) {
-        JLabel l = new JLabel(text);
-        l.setFont(new Font("SansSerif", Font.BOLD, size));
-        l.setForeground(HEADING);
-        return l;
+    /** Two cards side by side; the left one gets leftShare of the width. */
+    private JComponent twoColumns(JComponent left, JComponent right, double leftShare) {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        GridBagConstraints g = new GridBagConstraints();
+        g.fill = GridBagConstraints.BOTH;
+        g.weighty = 1;
+        g.gridy = 0;
+        g.gridx = 0;
+        g.weightx = leftShare;
+        g.insets = new Insets(0, 0, 0, 7);
+        row.add(left, g);
+        g.gridx = 1;
+        g.weightx = 1 - leftShare;
+        g.insets = new Insets(0, 7, 0, 0);
+        row.add(right, g);
+        return row;
+    }
+
+    private JScrollPane tableScroll(JTable table) {
+        JScrollPane sp = new JScrollPane(table);
+        sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        sp.getViewport().setBackground(Theme.CARD);
+        sp.setPreferredSize(new Dimension(300, 230));
+        return sp;
+    }
+
+    private static JButton primaryButton(String text) {
+        JButton b = new JButton(text);
+        b.setPreferredSize(new Dimension(100, 32));
+        b.setBackground(Theme.BLUE);
+        b.setForeground(Color.WHITE);
+        b.setFont(new Font("SansSerif", Font.BOLD, 13));
+        b.setOpaque(true);
+        b.setContentAreaFilled(true);
+        b.setBorder(BorderFactory.createLineBorder(Theme.BLUE_DARK));
+        return b;   // stays focusable so it can be used from the keyboard
+    }
+
+    private static JToggleButton toggle(String text, boolean selected) {
+        JToggleButton b = new JToggleButton(text, selected);
+        b.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        b.setOpaque(true);
+        b.setContentAreaFilled(true);
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(4, 10, 4, 10)));
+        Runnable style = () -> {
+            b.setBackground(b.isSelected() ? Theme.BLUE : Theme.CARD);
+            b.setForeground(b.isSelected() ? Color.WHITE : Theme.TEXT);
+        };
+        b.addChangeListener(e -> style.run());
+        style.run();
+        return b;
     }
 
     private static DefaultTableModel readOnlyModel(String... cols) {
@@ -361,43 +621,279 @@ public class DashboardPanel extends JPanel {
         };
     }
 
-    private JTable makeTable(DefaultTableModel model) {
+    /** statusCol / moneyCol are 0-based column indexes, or -1 when the table has none. */
+    private JTable makeTable(DefaultTableModel model, int statusCol, int moneyCol) {
         JTable t = new JTable(model);
-        t.setRowHeight(25);
-        t.setBackground(DARK);
-        t.setForeground(TEXT_LIGHT);
-        t.setSelectionBackground(BLUE);
-        t.setSelectionForeground(Color.WHITE);
-        t.setShowGrid(false);
-        t.setIntercellSpacing(new Dimension(0, 0));
+        t.setRowHeight(30);
+        t.setBackground(Theme.CARD);
+        t.setForeground(Theme.TEXT);
+        t.setSelectionBackground(Color.decode("#DBEAFE"));
+        t.setSelectionForeground(Theme.TEXT);
+        t.setShowHorizontalLines(true);
+        t.setShowVerticalLines(false);
+        t.setGridColor(Theme.BORDER);
+        t.setIntercellSpacing(new Dimension(0, 1));
         t.setFillsViewportHeight(true);
         t.setFont(new Font("SansSerif", Font.PLAIN, 13));
         t.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
 
-        DefaultTableCellRenderer cell = new DefaultTableCellRenderer();
-        cell.setHorizontalAlignment(SwingConstants.LEFT);
-        cell.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
-        t.setDefaultRenderer(Object.class, cell);
+        DefaultTableCellRenderer plain = new DefaultTableCellRenderer();
+        plain.setHorizontalAlignment(SwingConstants.LEFT);
+        plain.setBorder(new EmptyBorder(0, 8, 0, 8));
+        t.setDefaultRenderer(Object.class, plain);
+
+        if (statusCol >= 0) {
+            // Status is always written out as text; the colour is only a second cue.
+            t.getColumnModel().getColumn(statusCol).setCellRenderer(new DefaultTableCellRenderer() {
+                @Override
+                public Component getTableCellRendererComponent(JTable table, Object value, boolean sel,
+                                                               boolean focus, int row, int col) {
+                    super.getTableCellRendererComponent(table, value, sel, false, row, col);
+                    String status = value == null ? "" : value.toString();
+                    setForeground(Theme.statusColor(status));
+                    setFont(getFont().deriveFont(Font.BOLD));
+                    setBorder(new EmptyBorder(0, 8, 0, 8));
+                    return this;
+                }
+            });
+        }
+        if (moneyCol >= 0) {
+            DefaultTableCellRenderer right = new DefaultTableCellRenderer();
+            right.setHorizontalAlignment(SwingConstants.RIGHT);
+            right.setBorder(new EmptyBorder(0, 8, 0, 12));
+            t.getColumnModel().getColumn(moneyCol).setCellRenderer(right);
+        }
 
         JTableHeader header = t.getTableHeader();
         header.setReorderingAllowed(false);
-        header.setResizingAllowed(false);
         header.setPreferredSize(new Dimension(100, 32));
         header.setDefaultRenderer(new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
                                                            boolean isSelected, boolean hasFocus, int row, int column) {
                 super.getTableCellRendererComponent(table, value, false, false, row, column);
-                setHorizontalAlignment(SwingConstants.CENTER);
-                setBackground(DARK);
-                setForeground(TEXT_LIGHT);
-                setFont(new Font("SansSerif", Font.PLAIN, 13));
+                setHorizontalAlignment(column == moneyCol ? SwingConstants.RIGHT : SwingConstants.LEFT);
+                setBackground(Theme.BACKGROUND);
+                setForeground(Theme.MUTED);
+                setFont(new Font("SansSerif", Font.BOLD, 12));
                 setOpaque(true);
-                setBorder(BorderFactory.createMatteBorder(0, 0, 1, 1, DARK_LINE));
+                setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER),
+                        new EmptyBorder(0, 8, 0, column == moneyCol ? 12 : 8)));
                 return this;
             }
         });
         return t;
+    }
+
+    // =====================================================
+    // SMALL CUSTOM COMPONENTS
+    // =====================================================
+
+    /** A small filled circle used in the legend. */
+    private static final class DotIcon implements Icon {
+        private final Color color;
+
+        DotIcon(Color color) {
+            this.color = color;
+        }
+
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(color);
+            g2.fillOval(x, y + 1, 10, 10);
+            g2.dispose();
+        }
+
+        public int getIconWidth()  { return 12; }
+        public int getIconHeight() { return 12; }
+    }
+
+    /** Vertical bar chart with a value label on every bar and horizontal grid lines. */
+    private static final class BarChart extends JPanel {
+        private String[] labels = new String[0];
+        private long[] values = new long[0];
+        private String caption = "";
+        private String message;   // when set, shown instead of the chart
+
+        BarChart() {
+            setOpaque(false);
+        }
+
+        void setData(String[] labels, long[] values, String caption) {
+            this.labels = labels;
+            this.values = values;
+            this.caption = caption;
+            long sum = 0;
+            for (long v : values) sum += v;
+            this.message = sum == 0 ? "No bookings in this period." : null;
+            repaint();
+        }
+
+        void setMessage(String message) {
+            this.message = message;
+            repaint();
+        }
+
+        private static long niceStep(long n) {
+            long mag = 1;
+            while (mag * 10 <= n) mag *= 10;
+            for (long m : new long[]{1, 2, 5, 10}) {
+                if (m * mag >= n) return m * mag;
+            }
+            return 10 * mag;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            int w = getWidth(), h = getHeight();
+            Font small = new Font("SansSerif", Font.PLAIN, 11);
+            g2.setFont(small);
+            FontMetrics fm = g2.getFontMetrics();
+
+            int captionH = 22;
+            if (message != null) {
+                g2.setColor(Theme.MUTED);
+                g2.setFont(Theme.SUBTLE);
+                String m = message;
+                g2.drawString(m, (w - g2.getFontMetrics().stringWidth(m)) / 2, h / 2);
+                g2.dispose();
+                return;
+            }
+
+            long max = 0;
+            for (long v : values) max = Math.max(max, v);
+            long step = niceStep(Math.max(1, (max + 3) / 4));
+            long top = step * 4;
+
+            int left = 36, right = 8, topPad = 14, bottomPad = 22 + captionH;
+            int plotW = w - left - right, plotH = h - topPad - bottomPad;
+            if (plotW <= 0 || plotH <= 0) {
+                g2.dispose();
+                return;
+            }
+
+            // grid + y labels
+            for (int i = 0; i <= 4; i++) {
+                int y = topPad + plotH - (int) Math.round(plotH * (i * step) / (double) top);
+                g2.setColor(Theme.BORDER);
+                g2.drawLine(left, y, left + plotW, y);
+                g2.setColor(Theme.MUTED);
+                String s = String.valueOf(i * step);
+                g2.drawString(s, left - 6 - fm.stringWidth(s), y + fm.getAscent() / 2 - 1);
+            }
+
+            // bars
+            int n = values.length;
+            double slot = plotW / (double) n;
+            int barW = (int) Math.max(4, Math.min(48, slot * 0.6));
+            int labelEvery = slot < 22 ? 2 : 1;           // keep x labels from overlapping
+            boolean valueLabels = slot >= 20;
+            for (int i = 0; i < n; i++) {
+                int cx = left + (int) Math.round(slot * i + slot / 2);
+                int bh = (int) Math.round(plotH * values[i] / (double) top);
+                int x = cx - barW / 2, y = topPad + plotH - bh;
+                g2.setColor(Theme.BLUE);
+                if (bh > 0) g2.fillRoundRect(x, y, barW, bh, 4, 4);
+                if (valueLabels && values[i] > 0) {
+                    g2.setColor(Theme.TEXT);
+                    String s = String.valueOf(values[i]);
+                    g2.drawString(s, cx - fm.stringWidth(s) / 2, y - 3);
+                }
+                if (i % labelEvery == 0 || i == n - 1) {
+                    g2.setColor(Theme.MUTED);
+                    g2.drawString(labels[i], cx - fm.stringWidth(labels[i]) / 2, topPad + plotH + 15);
+                }
+            }
+
+            g2.setColor(Theme.MUTED);
+            g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            g2.drawString(caption, left, h - 6);
+            g2.dispose();
+        }
+    }
+
+    /** Donut chart of booking counts per status; the total is written in the middle. */
+    private static final class DonutChart extends JPanel {
+        private Map<String, Long> counts = new LinkedHashMap<>();
+        private String message;
+
+        DonutChart() {
+            setOpaque(false);
+        }
+
+        void setData(Map<String, Long> counts) {
+            this.counts = counts;
+            long total = 0;
+            for (long v : counts.values()) total += v;
+            this.message = total == 0 ? "No bookings yet." : null;
+            repaint();
+        }
+
+        void setMessage(String message) {
+            this.message = message;
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            int size = Math.min(getWidth(), getHeight()) - 8;
+            int x = (getWidth() - size) / 2, y = (getHeight() - size) / 2;
+
+            if (message != null) {
+                g2.setColor(Theme.MUTED);
+                g2.setFont(Theme.SUBTLE);
+                String m = message;
+                g2.drawString(m, (getWidth() - g2.getFontMetrics().stringWidth(m)) / 2, getHeight() / 2);
+                g2.dispose();
+                return;
+            }
+
+            long total = 0;
+            for (long v : counts.values()) total += v;
+            double start = 90;   // 12 o'clock, going clockwise
+            for (Map.Entry<String, Long> e : counts.entrySet()) {
+                if (e.getValue() == 0) continue;
+                double extent = -360.0 * e.getValue() / total;
+                g2.setColor(Theme.statusColor(e.getKey()));
+                g2.fill(new Arc2D.Double(x, y, size, size, start, extent, Arc2D.PIE));
+                start += extent;
+            }
+            // white separators between slices, then cut the hole
+            g2.setColor(Theme.CARD);
+            g2.setStroke(new BasicStroke(2f));
+            start = 90;
+            for (Map.Entry<String, Long> e : counts.entrySet()) {
+                if (e.getValue() == 0) continue;
+                double a = Math.toRadians(start);
+                g2.drawLine(x + size / 2, y + size / 2,
+                        x + size / 2 + (int) Math.round(Math.cos(a) * size / 2),
+                        y + size / 2 - (int) Math.round(Math.sin(a) * size / 2));
+                start += -360.0 * e.getValue() / total;
+            }
+            int hole = (int) (size * 0.58);
+            Area ring = new Area(new Ellipse2D.Double(x + (size - hole) / 2.0, y + (size - hole) / 2.0, hole, hole));
+            g2.fill(ring);
+
+            g2.setColor(Theme.TEXT);
+            g2.setFont(new Font("SansSerif", Font.BOLD, 24));
+            String t = String.valueOf(total);
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(t, x + (size - fm.stringWidth(t)) / 2, y + size / 2 + 2);
+            g2.setColor(Theme.MUTED);
+            g2.setFont(new Font("SansSerif", Font.PLAIN, 11));
+            String sub = "Total Bookings";
+            fm = g2.getFontMetrics();
+            g2.drawString(sub, x + (size - fm.stringWidth(sub)) / 2, y + size / 2 + 18);
+            g2.dispose();
+        }
     }
 
     /** A panel that always matches the scroll pane's width (so only vertical scrolling happens). */
