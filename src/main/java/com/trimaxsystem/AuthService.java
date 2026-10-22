@@ -31,7 +31,9 @@ public final class AuthService {
      * console) because no email sender is connected yet. Set it to false once sendResetCode() below
      * really sends the code by email, otherwise anyone could reset any account's password.
      */
-    public static final boolean DEV_SHOW_RESET_CODE = true;
+    public static final boolean DEV_SHOW_RESET_CODE = false;
+    // Keep reset disabled until sendResetCode is connected to a verified email provider.
+    private static final boolean RESET_EMAIL_CONFIGURED = false;
 
     private static final String ADMIN_ROLE          = "Admin";
     private static final int    MAX_FAILED_ATTEMPTS = 5;     // wrong passwords before a temporary lock
@@ -338,6 +340,9 @@ public final class AuthService {
     public static String requestPasswordReset(String emailOrUsername) throws AuthException {
         String id = emailOrUsername == null ? "" : emailOrUsername.trim();
         if (id.isEmpty()) throw new AuthException("Please enter your email address or username.");
+        if (!RESET_EMAIL_CONFIGURED) {
+            throw new AuthException("Password reset is temporarily unavailable because email delivery is not configured. Please contact an administrator.");
+        }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
             String[] user = findUser(conn, id);     // {username, name, email} or null
@@ -502,14 +507,11 @@ public final class AuthService {
     }
 
     /**
-     * Delivers the reset code to the user. NOT CONNECTED YET: add your email sending here
-     * (SMTP, SendGrid, Resend, ...) and then set DEV_SHOW_RESET_CODE to false.
+     * Delivers the reset code through a configured email provider.
+     * Keep RESET_EMAIL_CONFIGURED false until this method actually sends email.
      */
     private static void sendResetCode(String email, String fullName, String code) {
-        if (DEV_SHOW_RESET_CODE) {
-            System.out.println("[DEV] Password reset code for " + email + ": " + code);
-        }
-        // TODO: send "code" to "email" here.
+        // TODO: integrate SMTP or a transactional email provider before enabling password reset.
     }
 
     // =====================================================
