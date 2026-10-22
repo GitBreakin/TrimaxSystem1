@@ -308,7 +308,7 @@ public class MainFrame extends JFrame {
             g.setColor(Theme.TEXT);
             g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             if (notification) {
-                Path2D bellShape = new Path2D.Double();
+                        Path2D bellShape = new Path2D.Double();
                 bellShape.moveTo(5, 17);
                 bellShape.curveTo(7, 15, 7, 13, 7, 10);
                 bellShape.curveTo(7, 6, 9, 4, 12, 4);
