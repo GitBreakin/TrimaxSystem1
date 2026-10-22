@@ -31,8 +31,6 @@ public final class AuthService {
      * Never expose reset codes in the UI or console.
      */
     public static final boolean DEV_SHOW_RESET_CODE = false;
-    // Keep reset disabled until sendResetCode is connected to a verified email provider.
-    private static final boolean RESET_EMAIL_CONFIGURED = false;
 
     private static final String ADMIN_ROLE          = "Admin";
     private static final int    MAX_FAILED_ATTEMPTS = 5;     // wrong passwords before a temporary lock
