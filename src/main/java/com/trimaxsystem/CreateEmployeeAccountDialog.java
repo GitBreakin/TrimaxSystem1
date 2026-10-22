@@ -5,7 +5,6 @@ import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
-import java.util.Arrays;
 import java.util.regex.Pattern;
 import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
@@ -17,7 +16,6 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.border.EmptyBorder;
@@ -29,8 +27,6 @@ final class CreateEmployeeAccountDialog extends JDialog {
     private final JTextField txtName = new JTextField(22);
     private final JTextField txtEmail = new JTextField(22);
     private final JTextField txtContact = new JTextField(22);
-    private final JPasswordField txtPassword = new JPasswordField(22);
-    private final JPasswordField txtConfirm = new JPasswordField(22);
     private final JComboBox<String> cmbRole = new JComboBox<>(new String[]{"Agent", "Driver"});
     private final javax.swing.JButton btnCreate = UiKit.primaryButton("Create employee account");
     private final Runnable onCreated;
@@ -79,8 +75,6 @@ final class CreateEmployeeAccountDialog extends JDialog {
                 }
             }
         });
-        styleField(txtPassword);
-        styleField(txtConfirm);
         cmbRole.setFont(Theme.SUBTLE);
         cmbRole.setBackground(Theme.CARD);
         cmbRole.setForeground(Theme.TEXT);
@@ -91,8 +85,6 @@ final class CreateEmployeeAccountDialog extends JDialog {
         addField(fields, "Email", txtEmail);
         addField(fields, "Contact number", txtContact);
         addField(fields, "Employee role", cmbRole);
-        addField(fields, "Password", txtPassword);
-        addField(fields, "Confirm password", txtConfirm);
 
         JPanel formCard = new JPanel(new BorderLayout());
         formCard.setBackground(Theme.CARD);
@@ -139,16 +131,7 @@ final class CreateEmployeeAccountDialog extends JDialog {
             txtContact.requestFocusInWindow();
             return;
         }
-        char[] password = txtPassword.getPassword();
-        char[] confirmation = txtConfirm.getPassword();
-        if (!Arrays.equals(password, confirmation)) {
-            AuthUI.wipe(password, confirmation);
-            JOptionPane.showMessageDialog(this, "The passwords do not match.",
-                    "Please check", JOptionPane.WARNING_MESSAGE);
-            txtConfirm.requestFocusInWindow();
-            return;
-        }
-        AuthUI.wipe(confirmation);
+
         String fullName = txtName.getText();
         String email = txtEmail.getText();
         String contactNumber = contact;
@@ -157,17 +140,17 @@ final class CreateEmployeeAccountDialog extends JDialog {
         new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
-                return AccountService.createEmployee(fullName, email, contactNumber, role, password);
+                return AccountService.createEmployee(fullName, email, contactNumber, role);
             }
 
             @Override
             protected void done() {
-                AuthUI.wipe(password);
                 setBusy(false);
                 try {
                     String username = get();
                     JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
-                            "Employee account created and activated.\nGenerated username: " + username,
+                            "Employee account created.\nUsername: " + username
+                                    + "\nA one-time password setup code was emailed to the employee.",
                             "Account Created", JOptionPane.INFORMATION_MESSAGE);
                     if (onCreated != null) onCreated.run();
                     dispose();
