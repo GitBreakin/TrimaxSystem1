@@ -27,9 +27,8 @@ public final class AuthService {
     // =====================================================
 
     /**
-     * DEVELOPMENT ONLY. While true, the password-reset code is shown on screen (and printed to the
-     * console) because no email sender is connected yet. Set it to false once sendResetCode() below
-     * really sends the code by email, otherwise anyone could reset any account's password.
+     * Must remain false until reset codes are delivered through a verified email provider.
+     * Never expose reset codes in the UI or console.
      */
     public static final boolean DEV_SHOW_RESET_CODE = false;
     // Keep reset disabled until sendResetCode is connected to a verified email provider.
@@ -340,7 +339,7 @@ public final class AuthService {
     public static String requestPasswordReset(String emailOrUsername) throws AuthException {
         String id = emailOrUsername == null ? "" : emailOrUsername.trim();
         if (id.isEmpty()) throw new AuthException("Please enter your email address or username.");
-        if (!RESET_EMAIL_CONFIGURED) {
+        if (!emailDeliveryConfigured()) {
             throw new AuthException("Password reset is temporarily unavailable because email delivery is not configured. Please contact an administrator.");
         }
 
