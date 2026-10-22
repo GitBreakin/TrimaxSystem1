@@ -156,8 +156,7 @@ public final class AccountService {
     /**
      * Creates an active Agent or Driver account with a role-based username.
      */
-    public static String createEmployee(String fullName, String email, String contact,
-                                        String roleName, char[] password)
+    public static String createEmployee(String fullName, String email, String contact, String roleName)
             throws SQLException, AuthService.AuthException {
         AuthService.requireAdmin();
         fullName = fullName == null ? "" : fullName.trim();
@@ -177,30 +176,53 @@ public final class AccountService {
         if (!"Agent".equals(roleName) && !"Driver".equals(roleName)) {
             throw new AuthService.AuthException("Choose an Agent or Driver role.");
         }
+        if (!EmailService.isConfigured()) {
+            throw new AuthService.AuthException(
+                    "Email is not configured. Set TRIMAX SMTP environment variables before creating employee accounts.");
+        }
+
         String username = employeeUsername(fullName, roleName);
-        String passwordProblem = AuthService.validatePassword(password);
-        if (passwordProblem != null) throw new AuthService.AuthException(passwordProblem);
+        char[] initialPassword = new char[32];
+        String alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        initialPassword[0] = 'T';
+        for (int i = 1; i < initialPassword.length - 1; i++) {
+            initialPassword[i] = alphabet.charAt(random.nextInt(alphabet.length()));
+        }
+        initialPassword[initialPassword.length - 1] = '7';
 
         String sql = "INSERT INTO users (username, password, name, email, contact_num, role_id, account_status) "
                 + "SELECT ?, ?, ?, ?, ?, role_id, 'Active' FROM roles WHERE role_name = ?";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, username);
-            ps.setString(2, PasswordHasher.hash(password));
-            ps.setString(3, fullName);
-            ps.setString(4, email);
-            ps.setString(5, contact);
-            ps.setString(6, roleName);
-            if (ps.executeUpdate() != 1) {
-                throw new AuthService.AuthException("The selected employee role is not configured.");
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    ps.setString(1, username);
+                    ps.setString(2, PasswordHasher.hash(initialPassword));
+                    ps.setString(3, fullName);
+                    ps.setString(4, email);
+                    ps.setString(5, contact);
+                    ps.setString(6, roleName);
+                    if (ps.executeUpdate() != 1) {
+                        throw new AuthService.AuthException("The selected employee role is not configured.");
+                    }
+                }
+
+                // Email a one-time setup code. If delivery fails, roll back account creation too.
+                AuthService.createEmployeeSetupCode(conn, username, email, fullName);
+                conn.commit();
+                return username;
+            } catch (SQLException | AuthService.AuthException ex) {
+                conn.rollback();
+                if (ex instanceof SQLException && "23505".equals(((SQLException) ex).getSQLState())) {
+                    throw new AuthService.AuthException("The generated username \"" + username
+                            + "\" or email address is already in use.");
+                }
+                throw ex;
+            } finally {
+                conn.setAutoCommit(true);
+                java.util.Arrays.fill(initialPassword, (char) 0);
             }
-            return username;
-        } catch (SQLException e) {
-            if ("23505".equals(e.getSQLState())) {
-                throw new AuthService.AuthException("The generated username \"" + username
-                        + "\" or email address is already in use.");
-            }
-            throw e;
         }
     }
 
