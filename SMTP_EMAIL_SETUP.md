@@ -35,4 +35,8 @@ Launch the desktop app from that same PowerShell window so it inherits the varia
 4. TRIMAX sends a one-time setup code to the employee. The code expires after 15 minutes and is stored hashed in the existing `password_resets` table.
 5. If SMTP is not configured or email delivery fails, the database transaction is rolled back so an account is not silently created without its setup email.
 
+## Android integration status
+
+The Android app still authenticates against its on-device SQLite database. The PostgreSQL account and emailed setup code are not yet shared with Android. A secured HTTPS API and an Android authentication/password-setup client are still required before these accounts can sign in through the mobile app. Do not treat this change alone as a completed end-to-end mobile account flow.
+
 Never commit SMTP passwords, provider API keys, or service-account credentials to Git.
