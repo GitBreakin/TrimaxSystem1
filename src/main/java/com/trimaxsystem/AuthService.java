@@ -366,7 +366,11 @@ public final class AuthService {
         try {
             EmailService.sendSetupCode(email, fullName, username, code.toString());
         } catch (Exception e) {
-            throw new AuthException("The setup email could not be sent. Check the SMTP configuration and try again.", e);
+            System.err.println("Failed to send employee setup email.");
+            e.printStackTrace();
+
+            throw new AuthException(
+                    "The setup email could not be sent. Check the SMTP configuration and try again.", e);
         }
     }
 
