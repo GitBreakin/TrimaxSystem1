@@ -295,16 +295,16 @@ public class BookingDetailDialog extends JDialog {
     }
 
     private void saveReceipt(BookingService.Detail d) {
-        JFileChooser chooser = new JFileChooser(new File("receipts"));
-        chooser.setDialogTitle("Save booking receipt");
-        chooser.setSelectedFile(new File("Receipt_" + d.bookingId + ".pdf"));
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-
-        File output = chooser.getSelectedFile();
-        if (!output.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
-            output = new File(output.getParentFile(), output.getName() + ".pdf");
-        }
         try {
+            JFileChooser chooser = new JFileChooser(ExportDirectories.receiptsDirectory());
+            chooser.setDialogTitle("Save booking receipt");
+            chooser.setSelectedFile(new File("Receipt_" + d.bookingId + ".pdf"));
+            if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+
+            File output = chooser.getSelectedFile();
+            if (!output.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+                output = new File(output.getParentFile(), output.getName() + ".pdf");
+            }
             File pdf = ReceiptPdfGenerator.generate(receiptData(d), output);
             JOptionPane.showMessageDialog(this, "Receipt saved to:\n" + pdf.getAbsolutePath(),
                     "Receipt Saved", JOptionPane.INFORMATION_MESSAGE);

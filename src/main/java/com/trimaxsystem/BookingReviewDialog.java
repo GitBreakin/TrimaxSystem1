@@ -274,7 +274,8 @@ public class BookingReviewDialog extends JDialog {
         data.change = change;
 
         try {
-            File pdf = ReceiptPdfGenerator.generate(data, new File("receipts", "Receipt_" + result.bookingId + ".pdf"));
+            File pdf = ReceiptPdfGenerator.generate(data,
+                    new File(ExportDirectories.receiptsDirectory(), "Receipt_" + result.bookingId + ".pdf"));
             JOptionPane.showMessageDialog(this,
                     "Booking #" + result.bookingId + " saved.\nReceipt: " + pdf.getAbsolutePath(),
                     "Success", JOptionPane.INFORMATION_MESSAGE);
