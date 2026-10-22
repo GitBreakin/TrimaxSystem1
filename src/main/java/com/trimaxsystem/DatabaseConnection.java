@@ -14,7 +14,7 @@ public class DatabaseConnection {
 
     private static final String[] FILE_LOCATIONS = {
             "trimax.properties",
-            System.getProperty("user.home") + "/.trimax/trimax.properties"
+            Paths.get(System.getProperty("user.home"), ".trimax", "trimax.properties").toString()
     };
 
     private static volatile Properties fileProps;
@@ -37,7 +37,8 @@ public class DatabaseConnection {
         }
         if (value == null || value.isBlank()) {
             throw new SQLException("Database is not configured: set " + envName
-                    + " or add \"" + fileKey + "\" to trimax.properties (see trimax.properties.example).");
+                    + " or configure \"" + fileKey + "\" in trimax.properties. "
+                    + "Copy trimax.properties.example to trimax.properties and fill in your database settings.");
         }
         return value.trim();
     }
