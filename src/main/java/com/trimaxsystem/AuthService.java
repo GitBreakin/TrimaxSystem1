@@ -31,7 +31,7 @@ public final class AuthService {
      * console) because no email sender is connected yet. Set it to false once sendResetCode() below
      * really sends the code by email, otherwise anyone could reset any account's password.
      */
-    public static final boolean DEV_SHOW_RESET_CODE = true;
+    public static final boolean DEV_SHOW_RESET_CODE = false;
 
     private static final String ADMIN_ROLE          = "Admin";
     private static final int    MAX_FAILED_ATTEMPTS = 5;     // wrong passwords before a temporary lock
@@ -335,9 +335,47 @@ public final class AuthService {
      *
      * @return the code only while DEV_SHOW_RESET_CODE is true (otherwise null)
      */
+    /**
+     * Creates a one-time password setup code within the caller's transaction, then emails it.
+     * If delivery fails, the caller can roll back both the employee and reset-code rows.
+     */
+    static void createEmployeeSetupCode(Connection conn, String username, String email, String fullName)
+            throws SQLException, AuthException {
+        if (!EmailService.isConfigured()) {
+            throw new AuthException("Email delivery is not configured. Set the TRIMAX SMTP environment variables first.");
+        }
+
+        StringBuilder code = new StringBuilder();
+        for (int i = 0; i < CODE_LENGTH; i++) {
+            code.append(CODE_CHARS.charAt(RANDOM.nextInt(CODE_CHARS.length())));
+        }
+
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM password_resets WHERE username = ?")) {
+            ps.setString(1, username);
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO password_resets (username, code_hash, expires_at) "
+                        + "VALUES (?, ?, now() + make_interval(mins => ?))")) {
+            ps.setString(1, username);
+            ps.setString(2, sha256Hex(code.toString()));
+            ps.setInt(3, RESET_MINUTES);
+            ps.executeUpdate();
+        }
+
+        try {
+            EmailService.sendSetupCode(email, fullName, username, code.toString());
+        } catch (Exception e) {
+            throw new AuthException("The setup email could not be sent. Check the SMTP configuration and try again.", e);
+        }
+    }
+
     public static String requestPasswordReset(String emailOrUsername) throws AuthException {
         String id = emailOrUsername == null ? "" : emailOrUsername.trim();
         if (id.isEmpty()) throw new AuthException("Please enter your email address or username.");
+        if (!EmailService.isConfigured()) {
+            throw new AuthException("Email delivery is not configured. Please contact the TRIMAX administrator.");
+        }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
             String[] user = findUser(conn, id);     // {username, name, email} or null
@@ -505,11 +543,12 @@ public final class AuthService {
      * Delivers the reset code to the user. NOT CONNECTED YET: add your email sending here
      * (SMTP, SendGrid, Resend, ...) and then set DEV_SHOW_RESET_CODE to false.
      */
-    private static void sendResetCode(String email, String fullName, String code) {
-        if (DEV_SHOW_RESET_CODE) {
-            System.out.println("[DEV] Password reset code for " + email + ": " + code);
+    private static void sendResetCode(String email, String fullName, String code) throws AuthException {
+        try {
+            EmailService.sendSetupCode(email, fullName, "", code);
+        } catch (Exception e) {
+            throw new AuthException("The password reset email could not be sent. Please try again later.", e);
         }
-        // TODO: send "code" to "email" here.
     }
 
     // =====================================================
