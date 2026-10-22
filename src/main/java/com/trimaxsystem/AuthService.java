@@ -510,6 +510,10 @@ public final class AuthService {
      * Delivers the reset code through a configured email provider.
      * Keep RESET_EMAIL_CONFIGURED false until this method actually sends email.
      */
+    private static boolean emailDeliveryConfigured() {
+        return false; // Enable only after a real email provider is configured.
+    }
+
     private static void sendResetCode(String email, String fullName, String code) {
         // TODO: integrate SMTP or a transactional email provider before enabling password reset.
     }
