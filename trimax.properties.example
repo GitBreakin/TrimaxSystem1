@@ -1,0 +1,7 @@
+# Copy this file to trimax.properties for local development.
+# Never commit real database credentials.
+# Environment variables TRIMAX_DB_URL, TRIMAX_DB_USER, and TRIMAX_DB_PASSWORD take precedence.
+
+db.url=jdbc:postgresql://YOUR_HOST:5432/YOUR_DATABASE?sslmode=require
+db.user=YOUR_DATABASE_USER
+db.password=REPLACE_WITH_YOUR_PASSWORD
