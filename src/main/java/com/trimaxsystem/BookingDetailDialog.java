@@ -169,13 +169,26 @@ public class BookingDetailDialog extends JDialog {
         String vehicle = d.vehicleId == null ? "None"
                 : d.vehicleId + (d.vehicleType == null ? "" : " - " + d.vehicleType);
 
-        addRow(grid, 0, "Created", Theme.formatWhen(d.date) + "  (Manila time, UTC+8)");
-        addRow(grid, 1, "Customer", orDash(d.clientName));
-        addRow(grid, 2, "Address", orDash(d.address));
-        addRow(grid, 3, "Contact", orDash(d.contact));
-        addRow(grid, 4, "Driver", driver);
-        addRow(grid, 5, "Vehicle", vehicle);
-        addRow(grid, 6, "Total", Theme.money(d.total));
+        int r = 0;
+        addRow(grid, r++, "Created", Theme.formatWhen(d.date) + "  (Manila time, UTC+8)"
+                + (d.fromMobile() ? "  -  from the mobile app" + (d.createdBy == null ? "" : " (" + d.createdBy + ")") : ""));
+        addRow(grid, r++, "Customer", orDash(d.clientName));
+        addRow(grid, r++, "Address", orDash(d.address));
+        addRow(grid, r++, "Contact", orDash(d.contact));
+        if (d.deliveryAddress != null && !d.deliveryAddress.equals(d.address)) {
+            addRow(grid, r++, "Deliver to", d.deliveryAddress);
+        }
+        if (d.schedule != null) addRow(grid, r++, "Requested", d.schedule);
+        if (d.instructions != null) addRow(grid, r++, "Instructions", d.instructions);
+        addRow(grid, r++, "Driver", driver);
+        addRow(grid, r++, "Vehicle", vehicle);
+        if (d.driverUsername != null && d.deliveryStatus != null) {
+            addRow(grid, r++, "Delivery", DeliveryStatus.label(d.deliveryStatus)
+                    + (d.deliveryStatusAt == null ? "" : "  (" + Theme.formatWhen(d.deliveryStatusAt) + ")")
+                    + (DeliveryStatus.FAILED.equals(d.deliveryStatus)
+                    ? "  -  review the reason in History, then cancel the booking to return its stock" : ""));
+        }
+        addRow(grid, r++, "Total", Theme.money(d.total));
         return card(grid);
     }
 
@@ -287,6 +300,12 @@ public class BookingDetailDialog extends JDialog {
                 row.add(b);
             }
         }
+        JButton refresh = button("Refresh", false);
+        refresh.setToolTipText("Reload this booking, e.g. to see the driver's latest progress");
+        refresh.addActionListener(e -> {
+            if (!busy) load();
+        });
+        row.add(refresh);
         JButton close = button("Close", false);
         close.addActionListener(e -> dispose());
         row.add(close);
@@ -449,8 +468,9 @@ public class BookingDetailDialog extends JDialog {
             box.add(historyLine("No status or driver changes have been recorded for this booking."));
         } else {
             for (AuditService.Entry e : d.history) {
+                String details = "booking.delivery_status".equals(e.action) ? DeliveryStatus.humanize(e.details) : e.details;
                 box.add(historyLine(Theme.formatWhen(e.when) + "  |  " + e.actor + "  |  "
-                        + historyLabel(e.action) + ": " + orDash(e.details)
+                        + historyLabel(e.action) + ": " + orDash(details)
                         + ("success".equals(e.result) ? "" : "  [" + e.result + "]")));
             }
         }
@@ -460,6 +480,8 @@ public class BookingDetailDialog extends JDialog {
     private static String historyLabel(String action) {
         if ("booking.status_change".equals(action)) return "Status";
         if ("booking.assign_driver".equals(action)) return "Driver";
+        if ("booking.create".equals(action)) return "Created";
+        if ("booking.delivery_status".equals(action)) return "Delivery";
         return action;
     }
 
@@ -514,7 +536,15 @@ public class BookingDetailDialog extends JDialog {
                         d.driverUsername == null ? "Assign driver" : "Change driver",
                         JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
                 if (ok == JOptionPane.OK_OPTION) {
-                    runAssign(d, (BookingService.DriverOption) combo.getSelectedItem());
+                    BookingService.DriverOption chosen = (BookingService.DriverOption) combo.getSelectedItem();
+                    if (chosen != null && Boolean.FALSE.equals(chosen.mobileLinked)
+                            && JOptionPane.showConfirmDialog(BookingDetailDialog.this,
+                            chosen.username + " has no mobile app sign-in, so this delivery will not appear on a phone.\n"
+                                    + "Link a sign-in under Accounts if they use the app. Assign anyway?",
+                            "Assign driver", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
+                        return;
+                    }
+                    runAssign(d, chosen);
                 }
             }
         }.execute();
@@ -573,7 +603,7 @@ public class BookingDetailDialog extends JDialog {
     private static JButton button(String text, boolean danger) {
         JButton b = new JButton(text);
         Color base = danger ? Theme.DANGER : Theme.BLUE;
-        boolean plain = text.equals("Close") || text.equals("Retry");
+        boolean plain = text.equals("Close") || text.equals("Retry") || text.equals("Refresh");
         b.setFont(new Font("SansSerif", Font.BOLD, 13));
         b.setOpaque(true);
         b.setContentAreaFilled(true);

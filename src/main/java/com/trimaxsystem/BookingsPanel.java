@@ -25,18 +25,25 @@ import javax.swing.table.JTableHeader;
  * Bookings list: one row per booking, with search, filters (status, driver, date range), server-side
  * sorting and paging, and a detail window (see {@link BookingDetailDialog}) for status changes.
  * "Add New Booking" still opens the existing booking window.
+ *
+ * Bookings created in the Android app are ordinary rows here. The Delivery column flags new mobile
+ * bookings and shows the driver's progress; the list refreshes itself every 30 seconds while it is on
+ * screen (polling, not realtime) so driver updates appear without pressing Refresh.
  */
 public class BookingsPanel extends JPanel {
 
     private static final int PAGE_SIZE = 25;
     private static final String TZ_SQL = "Asia/Manila";
 
-    private static final String[] COLS = {"Booking", "Customer", "Date / Time", "Items", "Total", "Driver", "Status"};
+    private static final String[] COLS = {"Booking", "Customer", "Date / Time", "Items", "Total", "Driver", "Status", "Delivery"};
     /** ORDER BY expression for each column. Only these fixed strings are ever put into the query. */
     private static final String[] SORT_SQL = {
             "b.booking_id", "LOWER(c.client_name)", "b.transc_date", "item_count",
-            "b.total_amount", "LOWER(COALESCE(u.name, 'Unassigned'))", "b.status"};
-    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_STATUS = 6;
+            "b.total_amount", "LOWER(COALESCE(u.name, 'Unassigned'))", "b.status",
+            "COALESCE(b.delivery_status, CASE WHEN b.created_via = 'mobile' THEN '0' ELSE '' END)"};
+    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_STATUS = 6, COL_DELIVERY = 7;
+    private static final int AUTO_REFRESH_MS = 30_000;
+    private static final java.time.format.DateTimeFormatter CLOCK = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private static final String FROM_WHERE_BASE =
             " FROM bookings b "
@@ -82,6 +89,10 @@ public class BookingsPanel extends JPanel {
 
     // Keeps only one "Add New Booking" window open at a time
     private JFrame bookingFrame;
+
+    // Quiet refresh while the list is on screen, so driver updates from phones show up.
+    private final Timer autoRefresh = new Timer(AUTO_REFRESH_MS, e -> autoRefreshTick());
+    private String refreshedAt = null;
 
     /** The filters the user applied. */
     private static final class Filters {
@@ -131,6 +142,15 @@ public class BookingsPanel extends JPanel {
 
         loadDrivers();
         load();
+        autoRefresh.start();
+    }
+
+    private void autoRefreshTick() {
+        if (!isDisplayable()) {
+            autoRefresh.stop();     // this panel was thrown away
+            return;
+        }
+        if (isShowing()) load(true);
     }
 
     // =====================================================
@@ -302,6 +322,14 @@ public class BookingsPanel extends JPanel {
                     // The status is always written out; the colour is only a second cue.
                     setForeground(Theme.statusColor(text));
                     setFont(Theme.NAV_ON);
+                } else if (col == COL_DELIVERY) {
+                    if (DeliveryStatus.label(DeliveryStatus.FAILED).equals(text)) {
+                        setForeground(Theme.DANGER);
+                        setFont(Theme.NAV_ON);
+                    } else if (DeliveryStatus.NEW_FROM_MOBILE.equals(text)) {
+                        setForeground(Theme.WARN);
+                        setFont(Theme.NAV_ON);
+                    }
                 }
                 setText(text);
                 setHorizontalAlignment(align);
@@ -438,12 +466,21 @@ public class BookingsPanel extends JPanel {
 
     /** Reloads the current page with the applied filters and sort. */
     public void load() {
+        load(false);
+    }
+
+    /**
+     * @param quiet automatic refresh: keep the current rows on screen while loading, keep the selected
+     *              booking selected, and if it fails keep showing the last rows with a note.
+     */
+    private void load(boolean quiet) {
         final int req = ++requestId;
         final Filters f = applied;
         final int p = page;
         final int sc = sortCol;
         final boolean asc = sortAsc;
-        showMessage("Loading bookings...", false);
+        final Integer keepSelected = selectedBookingId();
+        if (!quiet) showMessage("Loading bookings...", false);
         updateActiveLabel();
 
         new SwingWorker<Result, Void>() {
@@ -465,15 +502,25 @@ public class BookingsPanel extends JPanel {
                     }
                     model.setRowCount(0);
                     for (Object[] row : r.rows) model.addRow(row);
+                    reselect(keepSelected);
                     header().repaint();
                     if (r.rows.isEmpty()) {
                         showMessage(f.any() ? "No bookings match these filters." : "There are no bookings yet.", false);
                     } else {
                         centerCards.show(center, "TABLE");
                     }
+                    refreshedAt = java.time.LocalTime.now(Theme.BUSINESS_TZ).format(CLOCK);
                     updateFooter(r.rows.size());
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    if (quiet && model.getRowCount() > 0) {
+                        // Keep the rows the admin is looking at; say that they may be out of date.
+                        lblShowing.setText(lblShowing.getText().replaceAll("  \\u00B7 .*$", "")
+                                + "  \u00B7 Auto-refresh failed at "
+                                + java.time.LocalTime.now(Theme.BUSINESS_TZ).format(CLOCK) + ", showing earlier data");
+                        ex.printStackTrace();
+                        return;
+                    }
                     totalRows = 0;
                     model.setRowCount(0);
                     showMessage("Could not load bookings: " + cause.getMessage(), true);
@@ -486,6 +533,21 @@ public class BookingsPanel extends JPanel {
 
     private JTableHeader header() {
         return table.getTableHeader();
+    }
+
+    private Integer selectedBookingId() {
+        int row = table.getSelectedRow();
+        return row < 0 ? null : (Integer) model.getValueAt(row, COL_ID);
+    }
+
+    private void reselect(Integer bookingId) {
+        if (bookingId == null) return;
+        for (int i = 0; i < model.getRowCount(); i++) {
+            if (bookingId.equals(model.getValueAt(i, COL_ID))) {
+                table.setRowSelectionInterval(i, i);
+                return;
+            }
+        }
     }
 
     private void showMessage(String text, boolean error) {
@@ -503,7 +565,8 @@ public class BookingsPanel extends JPanel {
             long first = (long) page * PAGE_SIZE + 1;
             long last = first + shown - 1;
             long pages = (totalRows + PAGE_SIZE - 1) / PAGE_SIZE;
-            lblShowing.setText("Showing " + first + "-" + last + " of " + totalRows);
+            lblShowing.setText("Showing " + first + "-" + last + " of " + totalRows
+                    + (refreshedAt == null ? "" : "  \u00B7 Updated " + refreshedAt));
             lblPage.setText("Page " + (page + 1) + " of " + pages);
         }
         btnPrev.setEnabled(page > 0);
@@ -539,17 +602,22 @@ public class BookingsPanel extends JPanel {
             params.add(java.sql.Date.valueOf(f.to));
         }
 
-        String countSql = "SELECT COUNT(*)" + FROM_WHERE_BASE + where;
-        String dataSql = "SELECT b.booking_id, c.client_name, "
-                + "to_char(b.transc_date AT TIME ZONE '" + TZ_SQL + "', 'YYYY-MM-DD HH24:MI'), "
-                + "(SELECT COUNT(*) FROM booking_items bi WHERE bi.booking_id = b.booking_id) AS item_count, "
-                + "b.total_amount, COALESCE(u.name, 'Unassigned'), b.status"
-                + FROM_WHERE_BASE + where
-                + " ORDER BY " + SORT_SQL[sc] + (asc ? " ASC" : " DESC") + ", b.booking_id DESC"
-                + " LIMIT ? OFFSET ?";
-
         Result r = new Result();
         try (Connection conn = DatabaseConnection.getConnection()) {
+            // Without the mobile integration installed the Delivery column stays empty and sorts by booking.
+            boolean mobile = MobileIntegration.isInstalled(conn);
+            String sortSql = sc == COL_DELIVERY && !mobile ? SORT_SQL[COL_ID] : SORT_SQL[sc];
+            String countSql = "SELECT COUNT(*)" + FROM_WHERE_BASE + where;
+            String dataSql = "SELECT b.booking_id, c.client_name, "
+                    + "to_char(b.transc_date AT TIME ZONE '" + TZ_SQL + "', 'YYYY-MM-DD HH24:MI'), "
+                    + "(SELECT COUNT(*) FROM booking_items bi WHERE bi.booking_id = b.booking_id) AS item_count, "
+                    + "b.total_amount, COALESCE(u.name, 'Unassigned'), b.status, "
+                    + (mobile ? "b.created_via, b.driver_username, b.delivery_status"
+                              : "NULL::text, NULL::text, NULL::text")
+                    + FROM_WHERE_BASE + where
+                    + " ORDER BY " + sortSql + (asc ? " ASC" : " DESC") + ", b.booking_id DESC"
+                    + " LIMIT ? OFFSET ?";
+
             try (PreparedStatement ps = conn.prepareStatement(countSql)) {
                 bind(ps, params, 0);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -565,7 +633,8 @@ public class BookingsPanel extends JPanel {
                     while (rs.next()) {
                         r.rows.add(new Object[]{
                                 rs.getInt(1), rs.getString(2), rs.getString(3), rs.getInt(4),
-                                rs.getBigDecimal(5), rs.getString(6), rs.getString(7)});
+                                rs.getBigDecimal(5), rs.getString(6), rs.getString(7),
+                                mobile ? DeliveryStatus.listLabel(rs.getString(8), rs.getString(9), rs.getString(10)) : ""});
                     }
                 }
             }

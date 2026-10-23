@@ -273,6 +273,7 @@ public final class AccountService {
         public List<BookingRow> recentBookings = new ArrayList<>();   // drivers
         public List<ClientInfo> clients = new ArrayList<>();          // agents
         public long openBookings;                                     // drivers: Pending/Confirmed/In Progress
+        public MobileIntegration.Link mobile;                         // agents and drivers: mobile app sign-in
 
         public boolean isDriver() {
             return "Driver".equals(roleName);
@@ -353,7 +354,11 @@ public final class AccountService {
                         }
                     }
                 }
-            } else if (d.isAgent()) {
+            }
+            if (d.isDriver() || d.isAgent()) {
+                d.mobile = MobileIntegration.loadLink(conn, username);
+            }
+            if (d.isAgent()) {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT c.client_id, c.client_name, c.address FROM agents a "
                                 + "JOIN clients c ON c.client_id = a.client_id WHERE a.username = ? ORDER BY c.client_name")) {

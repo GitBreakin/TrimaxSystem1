@@ -18,6 +18,8 @@ public class BookingService {
         public final String name;
         public final String vehicleId;
         public final String vehicleType;
+        /** null when the mobile integration is not installed; false = this driver cannot see deliveries on a phone. */
+        public Boolean mobileLinked;
 
         public DriverOption(String username, String name, String vehicleId, String vehicleType) {
             this.username = username;
@@ -28,7 +30,8 @@ public class BookingService {
 
         @Override
         public String toString() {
-            return username + " - " + name + " (" + vehicleId + ")";
+            return username + " - " + name + " (" + vehicleId + ")"
+                    + (Boolean.FALSE.equals(mobileLinked) ? "  - no mobile app sign-in" : "");
         }
     }
 
@@ -65,6 +68,10 @@ public class BookingService {
                         rs.getString("name"),
                         rs.getString("vehicle_id"),
                         rs.getString("vehicle_type")));
+            }
+            if (MobileIntegration.isInstalled(conn)) {
+                java.util.Set<String> linked = MobileIntegration.linkedUsernames(conn);
+                for (DriverOption d : list) d.mobileLinked = linked.contains(d.username);
             }
         }
         return list;
@@ -182,6 +189,18 @@ public class BookingService {
         public List<Line> items = new ArrayList<>();
         /** Audit entries for this booking; null when the audit table does not exist yet or could not be read. */
         public List<AuditService.Entry> history;
+
+        // Mobile integration (all null when sql/20261023_01_mobile_booking_integration.sql is not installed,
+        // and for bookings made before it).
+        public String createdVia, createdBy;           // "mobile" + the agent's username
+        public String deliveryAddress, schedule, instructions;
+        public Double deliveryLatitude, deliveryLongitude;
+        public String deliveryStatus;                  // see DeliveryStatus
+        public Timestamp deliveryStatusAt;
+
+        public boolean fromMobile() {
+            return "mobile".equals(createdVia);
+        }
     }
 
     /** The booking was changed by someone else since the admin opened it. */
@@ -235,6 +254,27 @@ public class BookingService {
                         l.unitPrice = rs.getBigDecimal(3);
                         l.subtotal = rs.getBigDecimal(4);
                         d.items.add(l);
+                    }
+                }
+            }
+            if (MobileIntegration.isInstalled(conn)) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT created_via, created_by_username, delivery_address, delivery_latitude, delivery_longitude, "
+                                + "requested_schedule, special_instructions, delivery_status, delivery_status_at "
+                                + "FROM bookings WHERE booking_id = ?")) {
+                    ps.setInt(1, bookingId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            d.createdVia = rs.getString(1);
+                            d.createdBy = rs.getString(2);
+                            d.deliveryAddress = rs.getString(3);
+                            d.deliveryLatitude = (Double) rs.getObject(4);
+                            d.deliveryLongitude = (Double) rs.getObject(5);
+                            d.schedule = rs.getString(6);
+                            d.instructions = rs.getString(7);
+                            d.deliveryStatus = rs.getString(8);
+                            d.deliveryStatusAt = rs.getTimestamp(9);
+                        }
                     }
                 }
             }
@@ -350,7 +390,12 @@ public class BookingService {
                                 + " (vehicle " + newDriver.vehicleId + ")");
                 conn.commit();
                 return audited;
-            } catch (SQLException | ConflictException | RuntimeException ex) {
+            } catch (SQLException ex) {
+                conn.rollback();
+                String rule = MobileIntegration.friendlyMessage(ex);   // e.g. the driver already started it
+                if (rule != null) throw new IllegalStateException(rule, ex);
+                throw ex;
+            } catch (ConflictException | RuntimeException ex) {
                 conn.rollback();
                 throw ex;
             } finally {

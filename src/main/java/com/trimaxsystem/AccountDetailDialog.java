@@ -159,6 +159,14 @@ public class AccountDetailDialog extends JDialog {
         if (d.lockedUntil != null) {
             addRow(grid, r++, "Sign-in", "Temporarily locked after failed attempts, until " + Theme.formatWhen(d.lockedUntil));
         }
+        if (d.mobile != null) {
+            addRow(grid, r++, "Mobile app", !d.mobile.installed
+                    ? "Not set up on this database (run sql/20261023_01_mobile_booking_integration.sql)"
+                    : d.mobile.linked
+                    ? "Can sign in as " + d.mobile.email + "  (linked " + Theme.formatWhen(d.mobile.linkedAt)
+                      + (d.mobile.linkedBy == null ? "" : " by " + d.mobile.linkedBy) + ")"
+                    : "Cannot sign in to the mobile app (no linked sign-in)");
+        }
         return grid;
     }
 
@@ -285,11 +293,95 @@ public class AccountDetailDialog extends JDialog {
             on.addActionListener(e -> confirmAndChange(AccountService.ACTIVE));
             row.add(on);
         }
+        if (!self && d.mobile != null && d.mobile.installed) {
+            if (d.mobile.linked) {
+                JButton unlink = UiKit.dangerButton("Remove mobile sign-in");
+                unlink.addActionListener(e -> confirmAndUnlinkMobile());
+                row.add(unlink);
+            } else {
+                JButton link = UiKit.secondaryButton("Link mobile sign-in");
+                link.addActionListener(e -> confirmAndLinkMobile());
+                row.add(link);
+            }
+        }
         JButton close = UiKit.secondaryButton("Close");
         close.addActionListener(e -> dispose());
         row.add(close);
         p.add(row);
         return p;
+    }
+
+    // =====================================================
+    // MOBILE APP SIGN-IN
+    // =====================================================
+
+    private void confirmAndLinkMobile() {
+        if (busy) return;
+        final AccountService.Detail d = detail;
+        if (d.email == null || d.email.isBlank()) {
+            JOptionPane.showMessageDialog(this, "This account has no email address. The mobile sign-in is matched by email,\n"
+                    + "so add one to the account first.", "Link mobile sign-in", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Let " + d.name + " (" + d.username + ") sign in to the TRIMAX mobile app as " + d.email + "?\n\n"
+                        + "Before this works, a Supabase sign-in with exactly this email must exist and be confirmed:\n"
+                        + "Supabase dashboard > Authentication > Users > Add user (or Invite).\n\n"
+                        + "The phone always uses the role and Active status of this TRIMAX account.",
+                "Link mobile sign-in", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        runMobileChange(true);
+    }
+
+    private void confirmAndUnlinkMobile() {
+        if (busy) return;
+        final AccountService.Detail d = detail;
+        Object[] options = {"Yes, remove", "Keep"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "Remove the mobile app sign-in of " + d.name + " (" + d.username + ")?\n"
+                        + "They will be refused the next time the app contacts the server. Bookings are not changed.",
+                "Remove mobile sign-in", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, options, options[1]);
+        if (choice != 0) return;
+        runMobileChange(false);
+    }
+
+    private void runMobileChange(boolean link) {
+        final AccountService.Detail d = detail;
+        busy = true;
+        showMessage(link ? "Linking mobile sign-in..." : "Removing mobile sign-in...", false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                if (link) MobileIntegration.link(d.username, d.email);
+                else MobileIntegration.unlink(d.username);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                try {
+                    get();
+                    notice = link ? "Mobile sign-in linked to " + d.email + "." : "Mobile sign-in removed.";
+                    if (onChanged != null) onChanged.run();
+                } catch (Exception ex) {
+                    Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
+                    notice = null;
+                    if (cause instanceof AuthService.AuthException) {
+                        JOptionPane.showMessageDialog(AccountDetailDialog.this, cause.getMessage(),
+                                "Not allowed", JOptionPane.ERROR_MESSAGE);
+                        dispose();
+                        AuthFrame.logout(owner);
+                        return;
+                    }
+                    String rule = MobileIntegration.friendlyMessage(cause);
+                    JOptionPane.showMessageDialog(AccountDetailDialog.this,
+                            rule != null ? rule : "Nothing was changed: " + cause.getMessage(),
+                            link ? "Link mobile sign-in" : "Remove mobile sign-in", JOptionPane.ERROR_MESSAGE);
+                }
+                load();
+            }
+        }.execute();
     }
 
     // =====================================================
