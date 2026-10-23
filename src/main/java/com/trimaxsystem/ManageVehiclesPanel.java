@@ -396,8 +396,7 @@ public class ManageVehiclesPanel extends JPanel {
                 while (rs.next()) matches.add(rs.getString(1));
             }
             if (matches.isEmpty()) {
-                warn("No Driver" + DRIVER_ROLE_ID
-                        + ") was found with the username or name \"" + text + "\".", "Driver Not Found");
+                warn("No Driver was found with the username or name \"" + text + "\".", "Driver Not Found");
                 return false;
             }
             if (matches.size() > 1) {
