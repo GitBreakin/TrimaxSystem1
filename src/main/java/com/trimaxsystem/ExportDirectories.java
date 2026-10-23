@@ -1,22 +1,39 @@
+
 package com.trimaxsystem;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
-final class ExportDirectories {
-    private static final Path RECEIPTS = Path.of("C:\\Users\\Gigabyte\\Documents\\TRIMAX\\Receipts");
-    private static final Path REPORTS = Path.of("C:\\Users\\Gigabyte\\Documents\\TRIMAX\\Reports");
+public final class ExportDirectories {
+
+    private static final Path TRIMAX_DIR = Paths.get(
+            System.getProperty("user.home"),
+            "Documents",
+            "TRIMAX"
+    );
+
+    private static final Path RECEIPTS_DIR =
+            TRIMAX_DIR.resolve("Receipts");
+
+    private static final Path REPORTS_DIR =
+            TRIMAX_DIR.resolve("Reports");
 
     private ExportDirectories() {
+        // Utility class; no instances needed.
     }
 
-    static File receiptsDirectory() throws IOException {
-        return Files.createDirectories(RECEIPTS).toFile();
+    public static void initialize() throws IOException {
+        Files.createDirectories(RECEIPTS_DIR);
+        Files.createDirectories(REPORTS_DIR);
     }
 
-    static File reportsDirectory() throws IOException {
-        return Files.createDirectories(REPORTS).toFile();
+    public static Path receiptsDirectory() {
+        return RECEIPTS_DIR;
+    }
+
+    public static Path reportsDirectory() {
+        return REPORTS_DIR;
     }
 }

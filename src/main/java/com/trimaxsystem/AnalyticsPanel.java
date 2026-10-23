@@ -289,8 +289,12 @@ public class AnalyticsPanel extends JPanel {
         int kind = format.getSelectedIndex();   // 0 CSV, 1 Excel, 2 PDF
         String ext = kind == 0 ? ".csv" : kind == 1 ? ".xlsx" : ".pdf";
         try {
-            JFileChooser fc = new JFileChooser(ExportDirectories.reportsDirectory());
+            ExportDirectories.initialize();
+            JFileChooser fc = new JFileChooser(ExportDirectories.reportsDirectory().toFile());
             fc.setSelectedFile(new java.io.File(baseName + ext));
+            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
             if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
             Path p = fc.getSelectedFile().toPath();
             if (!p.getFileName().toString().toLowerCase().endsWith(ext)) {

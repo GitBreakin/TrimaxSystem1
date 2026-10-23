@@ -296,7 +296,8 @@ public class BookingDetailDialog extends JDialog {
 
     private void saveReceipt(BookingService.Detail d) {
         try {
-            JFileChooser chooser = new JFileChooser(ExportDirectories.receiptsDirectory());
+            ExportDirectories.initialize();
+            JFileChooser chooser = new JFileChooser(ExportDirectories.receiptsDirectory().toFile());
             chooser.setDialogTitle("Save booking receipt");
             chooser.setSelectedFile(new File("Receipt_" + d.bookingId + ".pdf"));
             if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;

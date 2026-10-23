@@ -26,11 +26,6 @@ public final class AuthService {
     // SETTINGS
     // =====================================================
 
-    /**
-     * DEVELOPMENT ONLY. While true, the password-reset code is shown on screen (and printed to the
-     * console) because no email sender is connected yet. Set it to false once sendResetCode() below
-     * really sends the code by email, otherwise anyone could reset any account's password.
-     */
     public static final boolean DEV_SHOW_RESET_CODE = false;
 
     private static final String ADMIN_ROLE          = "Admin";
@@ -366,11 +361,15 @@ public final class AuthService {
         try {
             EmailService.sendSetupCode(email, fullName, username, code.toString());
         } catch (Exception e) {
-            System.err.println("Failed to send employee setup email.");
-            e.printStackTrace();
-
+            System.err.println(
+                    "Failed to send employee setup email: "
+                            + e.getClass().getSimpleName()
+                            + ": " + e.getMessage()
+            );
             throw new AuthException(
-                    "The setup email could not be sent. Check the SMTP configuration and try again.", e);
+                    "The setup email could not be sent. Check the SMTP configuration and try again.",
+                    e
+            );
         }
     }
 
@@ -405,22 +404,45 @@ public final class AuthService {
                 ps.setString(1, user[0]);
                 ps.executeUpdate();
             }
+
+            String codeHash = sha256Hex(code.toString());
+
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO password_resets (username, code_hash, expires_at) "
                             + "VALUES (?, ?, now() + make_interval(mins => ?))")) {
                 ps.setString(1, user[0]);
-                ps.setString(2, sha256Hex(code.toString()));
+                ps.setString(2, codeHash);
                 ps.setInt(3, RESET_MINUTES);
                 ps.executeUpdate();
             }
 
-            sendResetCode(user[2], user[1], code.toString());
+            try {
+                sendResetCode(user[2], user[1], code.toString());
+            } catch (AuthException emailError) {
+                // Remove only the reset code created by this request.
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM password_resets WHERE username = ? AND code_hash = ?")) {
+                    ps.setString(1, user[0]);
+                    ps.setString(2, codeHash);
+                    ps.executeUpdate();
+                } catch (SQLException cleanupError) {
+                    emailError.addSuppressed(cleanupError);
+                }
+
+                System.err.println("Password reset email delivery failed.");
+                emailError.printStackTrace();
+
+                throw new AuthException(
+                        "The password reset email could not be sent. Please try again later.",
+                        emailError
+                );
+            }
+
             return DEV_SHOW_RESET_CODE ? code.toString() : null;
         } catch (SQLException e) {
             throw db(e);
         }
     }
-
     /**
      * Step 2 of "forgot password": checks the code and sets the new password.
      * All remembered sessions of that account are ended.

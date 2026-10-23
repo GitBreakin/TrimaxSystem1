@@ -435,6 +435,17 @@ public class MainFrame extends JFrame {
     }
 
     public static void main(String[] args) {
+        try {
+            ExportDirectories.initialize();
+        } catch (java.io.IOException e) {
+            javax.swing.JOptionPane.showMessageDialog(
+                    null,
+                    "The folder is not created\n" + e.getMessage(),
+                    "Folder Error",
+                    javax.swing.JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
         SwingUtilities.invokeLater(() -> new MainFrame());
     }
 }
