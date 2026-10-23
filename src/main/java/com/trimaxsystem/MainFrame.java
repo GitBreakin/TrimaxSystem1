@@ -54,6 +54,7 @@ public class MainFrame extends JFrame {
      */
     public MainFrame(Runnable onReady) {
         setTitle("TRI-MAX Goods Trading Management System");
+        setIconImages(BrandLogo.createWindowIcons());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);
         setMinimumSize(new Dimension(1000, 640));

@@ -1,7 +1,6 @@
 package com.trimaxsystem;
 
 import java.awt.*;
-import java.awt.geom.Path2D;
 import javax.swing.*;
 
 public class AuthFrame extends JFrame {
@@ -17,6 +16,7 @@ public class AuthFrame extends JFrame {
 
     public AuthFrame() {
         setTitle("TRI-MAX Goods Trading Management System");
+        setIconImages(BrandLogo.createWindowIcons());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);   // a resizable, maximized window leaves the taskbar visible
         setMinimumSize(new Dimension(1000, 700));  // (and uses the full screen when the taskbar is hidden)
@@ -39,7 +39,7 @@ public class AuthFrame extends JFrame {
         branding.setLayout(new BoxLayout(branding, BoxLayout.Y_AXIS));
         branding.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 40));
 
-        JLabel logoLabel = new JLabel(createLogoIcon());
+        JLabel logoLabel = new JLabel(BrandLogo.createIcon(320, 256));
         logoLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         branding.add(logoLabel);
         branding.add(Box.createVerticalStrut(16));
@@ -109,48 +109,6 @@ public class AuthFrame extends JFrame {
                     },
                     message -> showCard("LOGIN"));
         }
-    }
-
-    private static Icon createLogoIcon() {
-        return new Icon() {
-            @Override
-            public void paintIcon(Component component, Graphics graphics, int x, int y) {
-                Graphics2D g2 = (Graphics2D) graphics.create();
-                try {
-                    g2.translate(x, y);
-                    g2.scale(getIconWidth() / 100.0, getIconHeight() / 80.0);
-                    drawLogoPath(g2, Color.decode("#2563EB"), 10, 10, 90, 10, 75, 26, 25, 26);
-                    drawLogoPath(g2, Color.decode("#1D4ED8"), 10, 10, 25, 26, 25, 50, 10, 35);
-                    drawLogoPath(g2, Color.decode("#1D4ED8"), 90, 10, 90, 35, 75, 50, 75, 26);
-                    drawLogoPath(g2, Color.decode("#2563EB"), 25, 26, 50, 55, 38, 70, 25, 50);
-                    drawLogoPath(g2, Color.decode("#3B82F6"), 75, 26, 75, 50, 62, 70, 50, 55);
-                    drawLogoPath(g2, Color.decode("#1E40AF"), 50, 26, 62, 40, 50, 55, 38, 40);
-                } finally {
-                    g2.dispose();
-                }
-            }
-
-            @Override
-            public int getIconWidth() {
-                return 320;
-            }
-
-            @Override
-            public int getIconHeight() {
-                return 256;
-            }
-        };
-    }
-
-    private static void drawLogoPath(Graphics2D graphics, Color color, double... coordinates) {
-        Path2D path = new Path2D.Double();
-        path.moveTo(coordinates[0], coordinates[1]);
-        for (int i = 2; i < coordinates.length; i += 2) {
-            path.lineTo(coordinates[i], coordinates[i + 1]);
-        }
-        path.closePath();
-        graphics.setColor(color);
-        graphics.fill(path);
     }
 
     // Helper method accessible by child panels to switch screens
