@@ -14,6 +14,8 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import java.io.File;
+import java.nio.file.Path;
 
 /**
  * Review window shown after "Proceed": client details, ordered items, driver
@@ -274,7 +276,9 @@ public class BookingReviewDialog extends JDialog {
         data.change = change;
 
         try {
-            File pdf = ReceiptPdfGenerator.generate(data, new File("receipts", "Receipt_" + result.bookingId + ".pdf"));
+            ExportDirectories.initialize();
+            Path receiptPath = ExportDirectories.receiptsDirectory().resolve("Receipt_" + result.bookingId + ".pdf");
+            File pdf = ReceiptPdfGenerator.generate(data, receiptPath.toFile());
             JOptionPane.showMessageDialog(this,
                     "Booking #" + result.bookingId + " saved.\nReceipt: " + pdf.getAbsolutePath(),
                     "Success", JOptionPane.INFORMATION_MESSAGE);

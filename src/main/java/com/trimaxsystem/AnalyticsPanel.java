@@ -288,18 +288,22 @@ public class AnalyticsPanel extends JPanel {
     private void save(String baseName, ReportTable t) {
         int kind = format.getSelectedIndex();   // 0 CSV, 1 Excel, 2 PDF
         String ext = kind == 0 ? ".csv" : kind == 1 ? ".xlsx" : ".pdf";
-        JFileChooser fc = new JFileChooser();
-        fc.setSelectedFile(new java.io.File(baseName + ext));
-        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        Path p = fc.getSelectedFile().toPath();
-        if (!p.getFileName().toString().toLowerCase().endsWith(ext)) {
-            p = p.resolveSibling(p.getFileName() + ext);
-        }
-        if (Files.exists(p) && JOptionPane.showConfirmDialog(this, p.getFileName() + " already exists. Replace it?",
-                "Replace file", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
-            return;
-        }
         try {
+            ExportDirectories.initialize();
+            JFileChooser fc = new JFileChooser(ExportDirectories.reportsDirectory().toFile());
+            fc.setSelectedFile(new java.io.File(baseName + ext));
+            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            Path p = fc.getSelectedFile().toPath();
+            if (!p.getFileName().toString().toLowerCase().endsWith(ext)) {
+                p = p.resolveSibling(p.getFileName() + ext);
+            }
+            if (Files.exists(p) && JOptionPane.showConfirmDialog(this, p.getFileName() + " already exists. Replace it?",
+                    "Replace file", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
+                return;
+            }
             if (kind == 0) CsvExport.write(p, t.csvRows());
             else if (kind == 1) XlsxExport.write(p, t);
             else PdfExport.write(p, t);

@@ -124,7 +124,7 @@ public class InventoryPanel extends JPanel {
         fields.add(fieldGroup("Product", txtProduct));
         fields.add(fieldGroup("Supplier", txtSupplier));
         fields.add(fieldGroup("Price", txtPrice));
-        fields.add(fieldGroup("Stock quantity", txtStock));
+        fields.add(fieldGroup("Stock Quantity", txtStock));
         card.add(fields, BorderLayout.CENTER);
 
         JButton btnClear = UiKit.secondaryButton("Clear fields");
