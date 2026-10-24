@@ -14,8 +14,9 @@ import javax.swing.table.DefaultTableModel;
 /**
  * Live GPS Monitoring: where the vehicles last reported themselves, with an honest freshness state.
  *
- * - Only drivers' vehicles report positions (the database keeps one "last known position" per vehicle).
- *   There is no live position for agents and no history. Nothing is guessed or animated.
+ * - Drivers' phones report their vehicle's position while on duty (trimax_update_location; the database keeps
+ *   one "last known position" per vehicle). Agents' positions are on AgentLocationsPanel. No history is kept.
+ *   Nothing is guessed or animated.
  * - A position is CURRENT only if it was updated within the configured limit; otherwise it is STALE and
  *   drawn as a ring, labelled "stale". A vehicle with no coordinates is listed as "No location".
  * - Locations refresh on a configurable interval, only while this page is showing.
@@ -219,8 +220,8 @@ public class LiveGpsPanel extends JPanel {
         row2.add(btnRefresh);
         row2.add(lblUpdated);
 
-        JLabel note = new JLabel("Only drivers' vehicles report a position, and only the latest one is stored. "
-                + "Agents do not report a live position; no history is kept.");
+        JLabel note = new JLabel("A driver's phone reports the vehicle position while the driver is on duty in the app; "
+                + "only the latest one is stored (no history). Agents' positions are on the Agent Locations page.");
         note.setFont(new Font("SansSerif", Font.PLAIN, 12));
         note.setForeground(Theme.MUTED);
         lblActive.setFont(Theme.SUBTLE);

@@ -262,14 +262,28 @@ public final class GpsService {
         }
     }
 
-    /** Returns the driver's current delivery, or null if they have no In Progress booking. */
+    /**
+     * Returns the driver's current delivery, or null if they have no In Progress booking. A booking made in
+     * the Android app carries its own pinned delivery point; that pin wins over the customer's saved one.
+     */
     public static Destination loadDestination(String driverUsername) throws SQLException {
-        String sql = "SELECT b.booking_id, c.client_name, c.address, c.latitude, c.longitude, COUNT(*) OVER () "
-                + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
-                + "WHERE b.driver_username = ? AND b.status = 'In Progress' "
-                + "ORDER BY b.transc_date DESC LIMIT 1";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            boolean pins = MobileIntegration.isInstalled(conn);
+            String sql = "SELECT b.booking_id, c.client_name, "
+                    + (pins ? "COALESCE(b.delivery_address, c.address), "
+                            + "CASE WHEN b.delivery_latitude IS NOT NULL THEN b.delivery_latitude ELSE c.latitude END, "
+                            + "CASE WHEN b.delivery_latitude IS NOT NULL THEN b.delivery_longitude ELSE c.longitude END, "
+                            : "c.address, c.latitude, c.longitude, ")
+                    + "COUNT(*) OVER () "
+                    + "FROM bookings b JOIN clients c ON c.client_id = b.client_id "
+                    + "WHERE b.driver_username = ? AND b.status = 'In Progress' "
+                    + "ORDER BY b.transc_date DESC LIMIT 1";
+            return queryDestination(conn, sql, driverUsername);
+        }
+    }
+
+    private static Destination queryDestination(Connection conn, String sql, String driverUsername) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, driverUsername);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return null;

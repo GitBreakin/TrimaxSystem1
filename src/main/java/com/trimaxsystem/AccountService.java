@@ -274,6 +274,8 @@ public final class AccountService {
         public List<ClientInfo> clients = new ArrayList<>();          // agents
         public long openBookings;                                     // drivers: Pending/Confirmed/In Progress
         public MobileIntegration.Link mobile;                         // agents and drivers: mobile app sign-in
+        public MobileIntegration.Invite invite;                       // agents and drivers: latest invitation
+        public String duty;                                           // agents and drivers: duty from the phone
 
         public boolean isDriver() {
             return "Driver".equals(roleName);
@@ -357,6 +359,8 @@ public final class AccountService {
             }
             if (d.isDriver() || d.isAgent()) {
                 d.mobile = MobileIntegration.loadLink(conn, username);
+                d.invite = MobileIntegration.loadInvite(conn, username);
+                d.duty = MobileIntegration.dutySummary(conn, username);
             }
             if (d.isAgent()) {
                 try (PreparedStatement ps = conn.prepareStatement(

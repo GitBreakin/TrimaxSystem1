@@ -137,20 +137,24 @@ final class CreateEmployeeAccountDialog extends JDialog {
         String contactNumber = contact;
         String role = (String) cmbRole.getSelectedItem();
         setBusy(true);
-        new SwingWorker<String, Void>() {
+        new SwingWorker<String[], Void>() {
             @Override
-            protected String doInBackground() throws Exception {
-                return AccountService.createEmployee(fullName, email, contactNumber, role);
+            protected String[] doInBackground() throws Exception {
+                String username = AccountService.createEmployee(fullName, email, contactNumber, role);
+                // Mobile app access: queue the invitation (the server sends it). Never fails the creation.
+                return new String[]{username, MobileIntegration.requestInviteQuietly(username)};
             }
 
             @Override
             protected void done() {
                 setBusy(false);
                 try {
-                    String username = get();
+                    String[] created = get();
+                    String username = created[0];
                     JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
                             "Employee account created.\nUsername: " + username
-                                    + "\nA one-time password setup code was emailed to the employee.",
+                                    + "\nA one-time password setup code was emailed to the employee."
+                                    + "\n" + created[1],
                             "Account Created", JOptionPane.INFORMATION_MESSAGE);
                     if (onCreated != null) onCreated.run();
                     dispose();

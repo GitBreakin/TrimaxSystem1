@@ -7,18 +7,22 @@ import java.util.List;
 /**
  * Driver progress on a booking (bookings.delivery_status), reported from the Android driver app.
  * It is separate from {@link BookingStatus}: the booking status stays the administrator's
- * Pending / Confirmed / In Progress / Completed / Cancelled. Only two driver steps move the booking
- * status, and the database does that itself: STARTED (Confirmed to In Progress) and DELIVERED
- * (In Progress to Completed). FAILED leaves the booking In Progress so an administrator decides
- * whether to cancel it, which returns the stock.
+ * Pending / Confirmed / In Progress / Completed / Cancelled. Drivers start at the TRIMAX hub and go
+ * straight to the customer (no pickup step): ASSIGNED -> ON_THE_WAY -> ARRIVED -> DELIVERED, or FAILED.
+ * Only two driver steps move the booking status, and the database does that itself: leaving the hub
+ * (Confirmed to In Progress) and DELIVERED (In Progress to Completed). FAILED leaves the booking
+ * In Progress so an administrator decides whether to cancel it, which returns the stock.
+ * STARTED and PICKED_UP only appear on bookings saved by older app versions.
  *
  * The allowed steps are enforced in the database (trimax_private.delivery_transition_allowed in
- * sql/20261023_01_mobile_booking_integration.sql); {@link #canTransition} mirrors it for display.
+ * sql/20261024_01_hub_gps_duty_provisioning.sql); {@link #canTransition} mirrors it for display.
  */
 public final class DeliveryStatus {
 
     public static final String ASSIGNED = "ASSIGNED";
+    /** Older app versions only. */
     public static final String STARTED = "STARTED";
+    /** Older app versions only (the pickup step was removed: drivers start at the hub). */
     public static final String PICKED_UP = "PICKED_UP";
     public static final String ON_THE_WAY = "ON_THE_WAY";
     public static final String ARRIVED = "ARRIVED";
@@ -40,8 +44,8 @@ public final class DeliveryStatus {
         if (code == null || code.isBlank()) return "";
         switch (code) {
             case ASSIGNED:   return "Assigned";
-            case STARTED:    return "Started";
-            case PICKED_UP:  return "Picked up";
+            case STARTED:    return "Started (older app)";
+            case PICKED_UP:  return "Picked up (older app)";
             case ON_THE_WAY: return "On the way";
             case ARRIVED:    return "Arrived";
             case DELIVERED:  return "Delivered";
@@ -59,9 +63,9 @@ public final class DeliveryStatus {
     public static boolean canTransition(String from, String to) {
         if (from == null || to == null) return false;
         switch (from) {
-            case ASSIGNED:   return STARTED.equals(to);
-            case STARTED:    return PICKED_UP.equals(to) || ON_THE_WAY.equals(to) || FAILED.equals(to);
-            case PICKED_UP:  return ON_THE_WAY.equals(to) || FAILED.equals(to);
+            case ASSIGNED:   return ON_THE_WAY.equals(to);
+            case STARTED:
+            case PICKED_UP:  return ON_THE_WAY.equals(to) || ARRIVED.equals(to) || FAILED.equals(to);
             case ON_THE_WAY: return ARRIVED.equals(to) || FAILED.equals(to);
             case ARRIVED:    return DELIVERED.equals(to) || FAILED.equals(to);
             default:         return false;

@@ -10,12 +10,11 @@ import org.junit.jupiter.api.Test;
 
 class DeliveryStatusTest {
 
-    /** Exactly the pairs in trimax_private.delivery_transition_allowed (sql/20261023_01_...). */
+    /** Exactly the pairs in trimax_private.delivery_transition_allowed (sql/20261024_01_...). */
     private static final Set<String> DATABASE_RULE = new HashSet<>(Arrays.asList(
-            "ASSIGNED>STARTED",
-            "STARTED>PICKED_UP", "STARTED>ON_THE_WAY", "PICKED_UP>ON_THE_WAY",
-            "ON_THE_WAY>ARRIVED", "ARRIVED>DELIVERED",
-            "STARTED>FAILED", "PICKED_UP>FAILED", "ON_THE_WAY>FAILED", "ARRIVED>FAILED"));
+            "ASSIGNED>ON_THE_WAY", "ON_THE_WAY>ARRIVED", "ON_THE_WAY>FAILED", "ARRIVED>DELIVERED", "ARRIVED>FAILED",
+            "STARTED>ON_THE_WAY", "STARTED>ARRIVED", "STARTED>FAILED",
+            "PICKED_UP>ON_THE_WAY", "PICKED_UP>ARRIVED", "PICKED_UP>FAILED"));
 
     @Test
     void transitionsMatchTheDatabaseRuleExactly() {
@@ -68,7 +67,8 @@ class DeliveryStatusTest {
 
     @Test
     void historyTextUsesWords() {
-        assertEquals("Started -> On the way", DeliveryStatus.humanize("STARTED -> ON_THE_WAY"));
+        assertEquals("Assigned -> On the way", DeliveryStatus.humanize("ASSIGNED -> ON_THE_WAY"));
+        assertEquals("Started (older app) -> On the way", DeliveryStatus.humanize("STARTED -> ON_THE_WAY"));
         assertEquals("Arrived -> Delivered (Received by Aling Nena | ok)",
                 DeliveryStatus.humanize("ARRIVED -> DELIVERED (Received by Aling Nena | ok)"));
         assertEquals("ON_THE_WAYS stays, $1 too", DeliveryStatus.humanize("ON_THE_WAYS stays, $1 too"));

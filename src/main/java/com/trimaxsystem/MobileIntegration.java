@@ -135,4 +135,120 @@ public final class MobileIntegration {
             }
         }
     }
+
+    // =====================================================
+    // MOBILE INVITATIONS (provisioning queue, sql/20261024_01) AND DUTY STATUS
+    // =====================================================
+
+    /** True when the provisioning queue (sql/20261024_01_hub_gps_duty_provisioning.sql) is installed. */
+    public static boolean provisioningInstalled(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT to_regprocedure('trimax_private.request_mobile_access(text,text)') IS NOT NULL");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() && rs.getBoolean(1);
+        }
+    }
+
+    /** Latest mobile invitation request of one account. */
+    public static final class Invite {
+        public boolean installed;
+        public String status;          // pending, processing, invited, linked, failed; null when never requested
+        public String lastError;
+        public Timestamp updatedAt;
+        public String requestedBy;
+
+        /** One line for the account window. */
+        public String describe() {
+            if (!installed) return "Automatic invitations are not set up (run sql/20261024_01).";
+            if (status == null) return "No invitation sent";
+            switch (status) {
+                case "pending":
+                case "processing": return "Invitation queued - waiting for the server";
+                case "invited":    return "Invitation email sent - waiting for the person to set a password";
+                case "linked":     return "Linked to an existing TRIMAX sign-in (password email sent)";
+                case "failed":     return "Invitation failed: " + (lastError == null ? "unknown reason" : lastError);
+                default:           return status;
+            }
+        }
+    }
+
+    public static Invite loadInvite(Connection conn, String username) throws SQLException {
+        Invite i = new Invite();
+        i.installed = provisioningInstalled(conn);
+        if (!i.installed) return i;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT status, last_error, updated_at, requested_by FROM trimax_private.provisioning_requests "
+                        + "WHERE username = ? ORDER BY request_id DESC LIMIT 1")) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    i.status = rs.getString(1);
+                    i.lastError = rs.getString(2);
+                    i.updatedAt = rs.getTimestamp(3);
+                    i.requestedBy = rs.getString(4);
+                }
+            }
+        }
+        return i;
+    }
+
+    /**
+     * Queues a mobile sign-in invitation for an Agent/Driver. The Supabase Edge Function creates the Auth
+     * user, emails the invitation and links it; nothing secret is needed here. Returns the request id.
+     */
+    public static long requestInvite(String username) throws SQLException, AuthService.AuthException {
+        AuthService.Session me = AuthService.requireAdmin();
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT trimax_private.request_mobile_access(?, ?)")) {
+            ps.setString(1, username);
+            ps.setString(2, me.username);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        }
+    }
+
+    /**
+     * After creating an employee account: queue the invitation if the queue is installed. Never throws;
+     * returns a sentence for the confirmation message.
+     */
+    public static String requestInviteQuietly(String username) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            if (!provisioningInstalled(conn)) {
+                return "Mobile app access: set it up from the account window (Link mobile sign-in).";
+            }
+        } catch (SQLException e) {
+            return "Mobile app access could not be checked; use the account window to send the invitation.";
+        }
+        try {
+            requestInvite(username);
+            return "A mobile app invitation has been queued; the person receives an email to set their password.";
+        } catch (SQLException e) {
+            String rule = friendlyMessage(e);
+            return "Mobile app invitation not sent: " + (rule != null ? rule : "database error") + ".";
+        } catch (AuthService.AuthException e) {
+            return "Mobile app invitation not sent: " + e.getMessage();
+        }
+    }
+
+    /** Duty state recorded by the phone (sql/20261024_01), or null when that is not installed. */
+    public static String dutySummary(Connection conn, String username) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT to_regclass('trimax_private.duty_events') IS NOT NULL");
+             ResultSet rs = ps.executeQuery()) {
+            if (!rs.next() || !rs.getBoolean(1)) return null;
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT event_type, recorded_at FROM trimax_private.duty_events WHERE username = ? "
+                        + "ORDER BY recorded_at DESC, event_id DESC LIMIT 1")) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return "No duty recorded from the mobile app";
+                String when = new java.text.SimpleDateFormat("MMM d, yyyy h:mm a").format(rs.getTimestamp(2));
+                return "START".equals(rs.getString(1)) ? "On duty since " + when + " (photo on file)"
+                        : "Off duty since " + when + " (photo on file)";
+            }
+        }
+    }
 }

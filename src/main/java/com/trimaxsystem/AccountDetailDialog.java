@@ -166,6 +166,13 @@ public class AccountDetailDialog extends JDialog {
                     ? "Can sign in as " + d.mobile.email + "  (linked " + Theme.formatWhen(d.mobile.linkedAt)
                       + (d.mobile.linkedBy == null ? "" : " by " + d.mobile.linkedBy) + ")"
                     : "Cannot sign in to the mobile app (no linked sign-in)");
+            if (!d.mobile.linked && d.invite != null && d.invite.installed) {
+                addRow(grid, r++, "Mobile invitation", d.invite.describe()
+                        + (d.invite.updatedAt == null ? "" : "  (" + Theme.formatWhen(d.invite.updatedAt) + ")"));
+            }
+            if (d.duty != null) {
+                addRow(grid, r++, "Duty (mobile)", d.duty);
+            }
         }
         return grid;
     }
@@ -299,6 +306,14 @@ public class AccountDetailDialog extends JDialog {
                 unlink.addActionListener(e -> confirmAndUnlinkMobile());
                 row.add(unlink);
             } else {
+                if (d.invite != null && d.invite.installed && "Active".equals(d.status)) {
+                    boolean open = "pending".equals(d.invite.status) || "processing".equals(d.invite.status);
+                    JButton invite = UiKit.primaryButton(d.invite.status == null ? "Send mobile invite" : "Send invite again");
+                    invite.setEnabled(!open);
+                    invite.setToolTipText("Creates the person's Supabase sign-in and emails them a link to set a password.");
+                    invite.addActionListener(e -> confirmAndInviteMobile());
+                    row.add(invite);
+                }
                 JButton link = UiKit.secondaryButton("Link mobile sign-in");
                 link.addActionListener(e -> confirmAndLinkMobile());
                 row.add(link);
@@ -331,6 +346,55 @@ public class AccountDetailDialog extends JDialog {
                 "Link mobile sign-in", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (choice != JOptionPane.OK_OPTION) return;
         runMobileChange(true);
+    }
+
+    private void confirmAndInviteMobile() {
+        if (busy) return;
+        final AccountService.Detail d = detail;
+        if (d.email == null || d.email.isBlank()) {
+            JOptionPane.showMessageDialog(this, "This account has no email address. Add one first; the invitation is sent to it.",
+                    "Send mobile invite", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Send " + d.name + " (" + d.username + ") an invitation to the TRIMAX mobile app?\n\n"
+                        + "An email goes to " + d.email + " with a link to set a password. The phone always uses\n"
+                        + "the role and Active status of this TRIMAX account. No password is shown or sent by this computer.",
+                "Send mobile invite", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        busy = true;
+        showMessage("Queuing the invitation...", false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                MobileIntegration.requestInvite(d.username);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                try {
+                    get();
+                    notice = "Invitation queued for " + d.email + ". The status below updates when the server has sent it.";
+                    if (onChanged != null) onChanged.run();
+                } catch (Exception ex) {
+                    Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
+                    notice = null;
+                    if (cause instanceof AuthService.AuthException) {
+                        JOptionPane.showMessageDialog(AccountDetailDialog.this, cause.getMessage(), "Not allowed", JOptionPane.ERROR_MESSAGE);
+                        dispose();
+                        AuthFrame.logout(owner);
+                        return;
+                    }
+                    String rule = MobileIntegration.friendlyMessage(cause);
+                    JOptionPane.showMessageDialog(AccountDetailDialog.this,
+                            rule != null ? rule : "Nothing was sent: " + cause.getMessage(),
+                            "Send mobile invite", JOptionPane.ERROR_MESSAGE);
+                }
+                load();
+            }
+        }.execute();
     }
 
     private void confirmAndUnlinkMobile() {
@@ -490,6 +554,10 @@ public class AccountDetailDialog extends JDialog {
         g.gridx = 0;
         grid.add(k, g);
         JLabel v = new JLabel(value);
+        if (value != null && value.length() > 90) {
+            // Long values (e.g. why an invitation failed) wrap instead of being cut off.
+            v.setText("<html><div style='width:430px'>" + value.replace("&", "&amp;").replace("<", "&lt;") + "</div></html>");
+        }
         v.setFont(Theme.SUBTLE);
         v.setForeground(Theme.TEXT);
         g.gridx = 1;
