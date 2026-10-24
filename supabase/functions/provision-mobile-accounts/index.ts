@@ -8,6 +8,24 @@ function json(status: number, body: unknown): Response {
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/**
+ * The server-side key Supabase gives every Edge Function. Projects on the new API keys get
+ * SUPABASE_SECRET_KEYS (JSON, e.g. {"default":"sb_secret_..."}); older projects get the legacy
+ * SUPABASE_SERVICE_ROLE_KEY. The new secret key is preferred when both exist.
+ */
+function serverKey(): string {
+    try {
+        const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, unknown>;
+        const preferred = typeof keys?.default === 'string' ? keys.default : undefined;
+        const any = Object.values(keys ?? {}).find((v) => typeof v === 'string' && v.startsWith('sb_secret_'));
+        const key = preferred ?? (typeof any === 'string' ? any : '');
+        if (key) return key;
+    } catch {
+        // Not set or not JSON: fall back to the legacy key.
+    }
+    return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+}
+
 const log = {
     info: (message: string, fields?: Record<string, unknown>) => console.log(JSON.stringify({ level: 'info', message, ...fields })),
     error: (message: string, fields?: Record<string, unknown>) => console.error(JSON.stringify({ level: 'error', message, ...fields })),
@@ -27,7 +45,7 @@ Deno.serve(async (req: Request) => {
     try {
         const results = await processQueue({
             supabaseUrl: (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/+$/, ''),
-            serviceRoleKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+            serviceRoleKey: serverKey(),
             redirectUrl: Deno.env.get('TRIMAX_INVITE_REDIRECT_URL') ?? 'trimax://auth-callback',
         }, fetch, log);
         return json(200, { processed: results.length, results });

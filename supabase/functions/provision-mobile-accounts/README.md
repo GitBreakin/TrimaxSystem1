@@ -31,27 +31,45 @@ The service-role key exists only inside Supabase. The function itself is protect
      off (only invitations create sign-ins);
    - optionally edit the "Invite user" and "Reset password" email templates (keep
      `{{ .ConfirmationURL }}`).
-3. **Create a secret.** Generate a random secret of at least 32 characters, for example
-   `openssl rand -hex 32`. Never commit it.
-4. **Deploy the function:**
+3. **Create a secret.** Generate a random secret of at least 32 characters and keep it in a password
+   manager. Never commit it. `openssl rand -hex 32`, or in Windows PowerShell:
+   ```powershell
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | % { $_.ToString("x2") })
    ```
-   supabase functions deploy provision-mobile-accounts --no-verify-jwt --project-ref <project-ref>
-   supabase secrets set TRIMAX_PROVISIONING_SECRET=<secret> TRIMAX_INVITE_REDIRECT_URL=trimax://auth-callback --project-ref <project-ref>
+4. **Deploy the function** (name exactly `provision-mobile-accounts`), either way:
+   - **Dashboard, nothing to install:** Edge Functions → Deploy a new function → Via Editor → name it
+     `provision-mobile-accounts` → replace the template with a single-file copy of this function
+     (`provision.ts` followed by `index.ts` without its `import` line) → Deploy function. Then open the
+     function and turn **Verify JWT** off.
+   - **CLI:**
+     ```
+     supabase functions deploy provision-mobile-accounts --no-verify-jwt --project-ref <project-ref>
+     ```
+     Without Docker, add `--use-api`. Always keep `--no-verify-jwt`: a deploy without it turns JWT
+     verification back on and every call fails with "Invalid JWT".
+
+   Then set the function's secrets (Edge Functions → Secrets, or `supabase secrets set ...`):
+   `TRIMAX_PROVISIONING_SECRET` = the secret, `TRIMAX_INVITE_REDIRECT_URL` = `trimax://auth-callback`.
+   Supabase provides `SUPABASE_URL` and the server key itself (`SUPABASE_SECRET_KEYS` on projects with the
+   new API keys, else the legacy `SUPABASE_SERVICE_ROLE_KEY`; the function uses whichever exists). Do not
+   put them anywhere else.
+
+   Check it (PowerShell). An empty queue answers `processed: 0`:
+   ```powershell
+   $secret = Read-Host "Provisioning secret"
+   Invoke-RestMethod -Method Post -Uri "https://<project-ref>.supabase.co/functions/v1/provision-mobile-accounts" `
+       -Headers @{ "x-trimax-provisioning-secret" = $secret } -ContentType "application/json" -Body "{}"
    ```
-   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided to Edge Functions by Supabase. Do not put
-   them anywhere else.
+   "Invalid JWT" / "Missing authorization header" = Verify JWT is still on. "Unauthorized." = wrong secret.
+   "Function is not configured." = `TRIMAX_PROVISIONING_SECRET` missing or shorter than 32 characters.
 5. **Run it automatically (optional but recommended):**
-   - enable the `pg_net` extension;
-   - create two Vault secrets: `trimax_provisioning_url` =
-     `https://<project-ref>.supabase.co/functions/v1/provision-mobile-accounts`, and
-     `trimax_provisioning_secret` = the same secret;
+   - enable the `pg_net` extension (Database → Extensions);
+   - create two Vault secrets (Vault page of the dashboard, or `select vault.create_secret('<value>', '<name>');`):
+     `trimax_provisioning_url` = `https://<project-ref>.supabase.co/functions/v1/provision-mobile-accounts`,
+     and `trimax_provisioning_secret` = the same secret;
    - run `sql/20261024_02_optional_provisioning_trigger.sql`.
 
-   Without this, process the queue by hand (requests stay `pending` until then):
-   ```
-   curl -X POST https://<project-ref>.supabase.co/functions/v1/provision-mobile-accounts \
-        -H "x-trimax-provisioning-secret: <secret>"
-   ```
+   Without this, requests stay `pending` until you run the check command above, which processes the queue.
 
 ## What the desktop shows
 
