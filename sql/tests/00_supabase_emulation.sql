@@ -20,6 +20,8 @@ create table auth.users (
     id uuid primary key default gen_random_uuid(),
     email text unique,
     email_confirmed_at timestamptz,
+    raw_app_meta_data jsonb default '{}'::jsonb,   -- app_metadata: only the service role can set it
+    invited_at timestamptz,
     created_at timestamptz not null default now()
 );
 
@@ -42,3 +44,38 @@ grant usage on schema public to anon, authenticated, service_role;
 alter default privileges for role app_owner in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges for role app_owner in schema public grant all on sequences to anon, authenticated, service_role;
 alter default privileges for role app_owner in schema public grant all on functions to anon, authenticated, service_role;
+
+-- Supabase Storage: the tables and helper the duty-photo policies use. Supabase lets "postgres" create
+-- policies on storage.objects; here app_owner (the "postgres" stand-in) owns the tables for that reason.
+create schema storage;
+create table storage.buckets (
+    id text primary key,
+    name text not null,
+    public boolean default false,
+    file_size_limit bigint,
+    allowed_mime_types text[],
+    created_at timestamptz default now()
+);
+create table storage.objects (
+    id uuid primary key default gen_random_uuid(),
+    bucket_id text references storage.buckets(id),
+    name text not null,
+    owner uuid,
+    owner_id text,
+    metadata jsonb,
+    created_at timestamptz not null default now(),
+    unique (bucket_id, name)
+);
+create function storage.foldername(name text) returns text[]
+language plpgsql immutable as $$
+declare _parts text[];
+begin
+    select string_to_array(name, '/') into _parts;
+    return _parts[1:array_length(_parts, 1) - 1];
+end $$;
+alter table storage.objects enable row level security;
+grant usage on schema storage to anon, authenticated, service_role, app_owner;
+grant all on storage.objects, storage.buckets to anon, authenticated, service_role;
+grant execute on function storage.foldername(text) to public;
+alter table storage.objects owner to app_owner;
+alter table storage.buckets owner to app_owner;

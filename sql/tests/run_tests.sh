@@ -37,17 +37,32 @@ psql_su -d "$DB" -f tests/10_mobile_integration_tests.sql 2>&1 | sed -n 's/^.*NO
 echo "== concurrency tests"
 bash tests/20_concurrency_tests.sh "$DB" "$SU"
 
+echo "== hub-start / GPS / duty / provisioning migration, twice (must be re-runnable)"
+psql_owner -f 20261024_01_hub_gps_duty_provisioning.sql
+psql_owner -f 20261024_01_hub_gps_duty_provisioning.sql
+psql_su -d "$DB" -f tests/11_hub_gps_duty_provisioning_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL HUB/p; /ERROR/p; /CONTEXT/p'
+
+echo "== optional provisioning trigger (pg_net and Vault stand-ins)"
+psql_su -d "$DB" -f tests/12_optional_provisioning_trigger_tests.sql
+psql_owner -f 20261024_02_optional_provisioning_trigger.sql
+psql_su -d "$DB" -v part2=1 -f tests/12_optional_provisioning_trigger_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL OPTIONAL/p; /ERROR/p; /CONTEXT/p'
+
 echo "== optional hardening, then the desktop's own statements must still work as the owner"
 psql_owner -f 20261023_02_optional_rls_hardening.sql
 psql_owner -c "select count(*) from bookings b left join clients c on c.client_id = b.client_id left join users u on u.username = b.driver_username" >/dev/null
 psql_owner -c "insert into bookings (client_id, driver_username, vehicle_id) values (1, 'driver.dan', 'TRK-001')" >/dev/null
 echo "PASS desktop queries and inserts work with RLS enabled (owner)"
 
-echo "== rollback, then migrate again"
+echo "== rollback (newest first), then migrate again"
+psql_owner -f 20261024_99_rollback_hub_gps_duty_provisioning.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('trimax_update_location', 'trimax_record_duty_event', 'trimax_service_claim_provisioning')")" = "0" \
+    && echo "PASS 20261024 rollback removed its functions"
+test "$(psql_owner -tAc "select count(*) from trimax_private.duty_events")" -gt 0 && echo "PASS 20261024 rollback kept the duty history"
 psql_owner -f 20261023_99_rollback_mobile_booking_integration.sql
 test "$(psql_owner -tAc "select count(*) from pg_proc where proname like 'trimax%'")" = "0" && echo "PASS rollback removed every trimax function"
 test "$(psql_owner -tAc "select count(*) from bookings where created_via = 'mobile'")" -gt 0 && echo "PASS rollback kept the mobile bookings"
 psql_owner -c "update bookings set driver_username = 'driver.dee', vehicle_id = 'TRK-002' where booking_id = 1" >/dev/null && echo "PASS desktop assignment works after rollback"
 psql_owner -f 20261023_01_mobile_booking_integration.sql
-echo "PASS migration re-applies after rollback"
+psql_owner -f 20261024_01_hub_gps_duty_provisioning.sql
+echo "PASS both migrations re-apply after rollback"
 echo "ALL DATABASE TESTS PASSED"
