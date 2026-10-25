@@ -86,4 +86,16 @@ psql_owner -f 20261025_97_rollback_media_tickets.sql
 test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('issue_media_ticket','trimax_service_redeem_media_ticket')")" = "0" && echo "PASS ticket rollback removed both functions"
 psql_owner -f 20261025_05_admin_media_tickets.sql
 echo "PASS tickets re-apply after rollback"
+
+echo "== Stage F: product images (twice: re-runnable)"
+psql_owner -f 20261025_06_product_images.sql
+psql_owner -f 20261025_06_product_images.sql
+psql_su -d "$DB" -f tests/42_product_images_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL PRODUCT IMAGE SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+echo "== Stage F rollback (part A), then re-apply"
+psql_owner -f 20261025_96_rollback_product_images.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('issue_product_image_ticket','set_product_image')")" = "0" && echo "PASS stage F rollback removed the Desktop picture functions"
+test "$(psql_owner -tAc "select count(*) from information_schema.columns where table_name = 'products' and column_name = 'image_path'")" = "1" && echo "PASS stage F rollback kept products.image_path"
+psql_owner -c "select trimax_private.issue_media_ticket('marc.admin', 'duty-photos', '00000000-0000-0000-0000-00000000d0d0/start_1_aa.jpg')" >/dev/null && echo "PASS duty photo tickets still work after the rollback"
+psql_owner -f 20261025_06_product_images.sql
+echo "PASS stage F re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"
