@@ -15,7 +15,8 @@
 -- Phones are not affected: they cannot see the ticket table or call either function.
 --
 -- ORDER: after 20261025_04. Re-runnable. Creates 1 table in trimax_private and 2 functions. Changes no rows.
--- NOT APPLIED to production. Needs approval.
+-- APPLIED to production on 2026-10-25 with the owner's approval (migration 20261025_05_admin_media_tickets);
+-- Edge Function trimax-admin-media deployed the same day (version 1, verify_jwt = false).
 -- =====================================================================================================
 
 begin;

@@ -8,7 +8,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_01` live baseline | Describes production; nothing to apply |
 | `_02`, `_03` | **Applied 2026-10-25**, with the owner's approval |
 | `_04` delivery proofs | **Applied 2026-10-25**, with the owner's approval |
-| `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Not applied / not deployed.** Needs approval |
+| `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Applied and deployed 2026-10-25**, with the owner's approval |
 
 ## Files (run in this order)
 
@@ -74,7 +74,12 @@ below are kept for a fresh project.
 4. Viewing the photos in the Desktop is a later step: the Desktop has no Storage access yet, and no
    storage key goes into any client code.
 
-### `_05` + Edge Function `trimax-admin-media` (after approval)
+### `_05` + Edge Function `trimax-admin-media`: applied and deployed 2026-10-25
+
+Checked afterwards: both functions match this file (md5); RLS on the ticket table, no API role can read
+it; only `service_role` can redeem, only the owner can issue; function ACTIVE with verify_jwt off; no new
+security advisor warnings. The live end-to-end check (a real photo through the function) is done from
+the Desktop, because this workspace cannot reach supabase.co. Steps kept for a fresh project:
 
 1. SQL Editor: run `20261025_05_admin_media_tickets.sql`.
 2. Deploy `supabase/functions/trimax-admin-media` (`index.ts` + `handler.ts`) with **verify_jwt = false**:
