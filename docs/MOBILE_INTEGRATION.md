@@ -17,8 +17,8 @@ Driver (Android)                                                                
 ----------------
 Deliveries list <----------------- trimax_driver_list_deliveries(): only bookings
                                     where driver_username = the signed-in driver
-Start (leaves the hub) / Arrived /
-Delivered / Failed --------------> trimax_driver_update_delivery_status(): allowed
+Start Delivery / Drop Off /
+Failed --------------------------> trimax_driver_update_delivery_status(): allowed
                                     transitions only, expected-status check ----------> "Delivery" column, details,
                                                                                        History (auto-refresh 30 s)
 GPS while on duty ---------------> trimax_update_location(): user_locations + vehicle -> Live GPS / Agent Locations
@@ -29,7 +29,9 @@ Duty start/end + photo ----------> Storage "duty-photos" + trimax_record_duty_ev
 ```
 
 Drivers start every delivery at the TRIMAX hub (14.7826996, 121.0475865) and go straight to the customer's
-pinned location: ASSIGNED -> ON_THE_WAY -> ARRIVED -> DELIVERED (or FAILED). There is no pickup step.
+pinned location: ASSIGNED -> STARTED (Start Delivery) -> DELIVERED (Drop Off), or FAILED once started
+(`sql/20261025_01_driver_started_delivered.sql`). There is no pickup step and no intermediate status.
+Starting or ending duty never changes a booking.
 
 * Android bookings go into the existing `bookings` / `booking_items` / `clients` / `agents` tables, so
   every desktop list, report, receipt and KPI includes them without changes.
@@ -83,7 +85,8 @@ It does not delete, rename or rewrite any existing data, and does not touch PR #
 1. **Delivery rules:** ASSIGNED -> ON_THE_WAY (needs Confirmed, moves it to In Progress) -> ARRIVED ->
    DELIVERED; FAILED once under way. Nothing can move into PICKED_UP any more; rows left in STARTED /
    PICKED_UP by older app builds can still finish. **Phones running the older app build cannot start new
-   deliveries after this** (they send STARTED): install the new APK at the same time.
+   deliveries after this** (they send STARTED): install the new APK at the same time. **Superseded by the
+   third migration below**, which makes ASSIGNED -> STARTED the first step again.
 2. **GPS:** adds `latitude`, `longitude`, `last_location_at` to `vehicles` if missing, creates
    `user_locations` if missing (and removes API access to it), and `trimax_update_location(...)`: the
    signed-in agent/driver's latest position, server timestamp, only while on duty, at most every 2 s.
@@ -95,6 +98,21 @@ It does not delete, rename or rewrite any existing data, and does not touch PR #
    (desktop only) and two functions executable **only by the service role** for the Edge Function. A
    Supabase sign-in is linked automatically only if TRIMAX created it for exactly that account
    (app_metadata, which only the service role can set) and its email matches.
+
+### Third migration (`sql/20261025_01_driver_started_delivered.sql`)
+
+Fixes "A delivery cannot go from ASSIGNED to STARTED" (the app sends STARTED; the second migration only
+accepted ON_THE_WAY). Replaces two functions, nothing else:
+1. **Delivery rules:** ASSIGNED -> STARTED (Start Delivery; needs Confirmed, moves it to In Progress) ->
+   DELIVERED (Drop Off; recipient name required; booking Completed), or STARTED -> FAILED (reason required;
+   booking stays In Progress). Nothing can move into PICKED_UP / ON_THE_WAY / ARRIVED; rows that older
+   builds left there can only be completed or failed.
+2. **Retries:** an exact repeat of a step the same driver just made (double tap, lost reply) returns the
+   saved booking (`already_recorded: true`) instead of an error; nothing is written twice. Everything
+   else (only the assigned, Active driver; expected-status check; admin confirmation) is unchanged.
+
+Works with or without the second migration. If the second migration is ever re-run, run this one again
+after it.
 
 ## Setup (in this order)
 
@@ -111,7 +129,7 @@ It does not delete, rename or rewrite any existing data, and does not touch PR #
    runs as `postgres`, stops with a clear error if a precondition fails, and is all-or-nothing.
 6. (Optional, after reading it) `sql/20261023_02_optional_rls_hardening.sql`.
 7. **Run the second migration** `sql/20261024_01_hub_gps_duty_provisioning.sql` the same way (it requires
-   the first). Roll out the new APK at the same time (see the note on older builds above).
+   the first), **then the third** `sql/20261025_01_driver_started_delivered.sql`.
 8. **Supabase Auth settings.** Turn off public sign-ups ("Allow new users to sign up"); keep "Confirm email"
    on; add `trimax://auth-callback` to Authentication → URL Configuration → Redirect URLs. Configure a custom
    SMTP sender (Authentication → Emails): Supabase's built-in sender is rate limited and meant for testing.
@@ -139,11 +157,11 @@ Use test accounts: one Agent (or Rider), two Drivers each with an `Available` ve
    back on, tap Confirm again → exactly one new booking on the desktop.
 5. Desktop: **Assign driver** → Driver A. Delivery = *Assigned*. Driver A's phone → Deliveries shows #N as
    "waiting for admin confirmation"; Driver B's phone does **not** show it.
-6. Desktop: **Mark as Confirmed**. Driver A: refresh → START NAVIGATION / START DELIVERY becomes available.
-7. Driver A (on duty, from the hub): START DELIVERY → the app shows On the way and navigation opens to the
-   customer's **pinned** point (not the hub, not the phone's position) → Arrived → drop-off photo +
-   recipient name → Confirm. No pickup step appears anywhere. The desktop shows the progress in the
-   Delivery column and History after each step, then *Completed*.
+6. Desktop: **Mark as Confirmed**. Driver A: refresh → START DELIVERY becomes available.
+7. Driver A (on duty, from the hub): START DELIVERY → the app shows STARTED (desktop: Delivery = *Started*,
+   booking *In Progress*) → DROP OFF / COMPLETE DELIVERY → drop-off photo + recipient name → Confirm →
+   DELIVERED, booking *Completed*. No pickup, on-the-way or arrived step appears anywhere. Tapping a button
+   twice changes the status once.
 8. Once the driver has started, the booking is *In Progress* and the desktop no longer offers **Change
    driver**; the database also refuses a driver change after the start (a desktop window opened before
    the start gets an error message and nothing is changed).
@@ -168,7 +186,9 @@ Use test accounts: one Agent (or Rider), two Drivers each with an `Available` ve
 
 ## Rollback
 
-Second migration first: `sql/20261024_99_rollback_hub_gps_duty_provisioning.sql` (keeps duty history,
+Newest first. `sql/20261025_99_rollback_driver_started_delivered.sql` puts back the delivery rules that
+were there before it (with the second migration installed, the app's Start Delivery fails again).
+Then the second migration: `sql/20261024_99_rollback_hub_gps_duty_provisioning.sql` (keeps duty history,
 provisioning requests, positions and links; re-run `sql/20261023_01_...` afterwards to restore the
 previous delivery rules). Then, if needed, `sql/20261023_99_rollback_mobile_booking_integration.sql`, part A: drops the functions, triggers and
 `trimax_private` (links and delivery events); **keeps** the bookings the app created and the new columns,

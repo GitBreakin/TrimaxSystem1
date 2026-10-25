@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 
 class DeliveryStatusTest {
 
-    /** Exactly the pairs in trimax_private.delivery_transition_allowed (sql/20261024_01_...). */
+    /** Exactly the pairs in trimax_private.delivery_transition_allowed (sql/20261025_01_...). */
     private static final Set<String> DATABASE_RULE = new HashSet<>(Arrays.asList(
-            "ASSIGNED>ON_THE_WAY", "ON_THE_WAY>ARRIVED", "ON_THE_WAY>FAILED", "ARRIVED>DELIVERED", "ARRIVED>FAILED",
-            "STARTED>ON_THE_WAY", "STARTED>ARRIVED", "STARTED>FAILED",
-            "PICKED_UP>ON_THE_WAY", "PICKED_UP>ARRIVED", "PICKED_UP>FAILED"));
+            "ASSIGNED>STARTED", "STARTED>DELIVERED", "STARTED>FAILED",
+            "PICKED_UP>DELIVERED", "PICKED_UP>FAILED", "ON_THE_WAY>DELIVERED", "ON_THE_WAY>FAILED",
+            "ARRIVED>DELIVERED", "ARRIVED>FAILED"));
 
     @Test
     void transitionsMatchTheDatabaseRuleExactly() {
@@ -62,15 +62,15 @@ class DeliveryStatusTest {
         assertEquals("", DeliveryStatus.listLabel(null, null, null));
         // A booking with a driver but no recorded progress (made before the migration) counts as assigned.
         assertEquals(DeliveryStatus.label(DeliveryStatus.ASSIGNED), DeliveryStatus.listLabel(null, "driver.dan", null));
-        assertEquals("On the way", DeliveryStatus.listLabel("mobile", "driver.dan", DeliveryStatus.ON_THE_WAY));
+        assertEquals("Started", DeliveryStatus.listLabel("mobile", "driver.dan", DeliveryStatus.STARTED));
     }
 
     @Test
     void historyTextUsesWords() {
-        assertEquals("Assigned -> On the way", DeliveryStatus.humanize("ASSIGNED -> ON_THE_WAY"));
-        assertEquals("Started (older app) -> On the way", DeliveryStatus.humanize("STARTED -> ON_THE_WAY"));
-        assertEquals("Arrived -> Delivered (Received by Aling Nena | ok)",
-                DeliveryStatus.humanize("ARRIVED -> DELIVERED (Received by Aling Nena | ok)"));
+        assertEquals("Assigned -> Started", DeliveryStatus.humanize("ASSIGNED -> STARTED"));
+        assertEquals("Started -> Delivered (Received by Aling Nena | ok)",
+                DeliveryStatus.humanize("STARTED -> DELIVERED (Received by Aling Nena | ok)"));
+        assertEquals("On the way (older app) -> Delivered", DeliveryStatus.humanize("ON_THE_WAY -> DELIVERED"));
         assertEquals("ON_THE_WAYS stays, $1 too", DeliveryStatus.humanize("ON_THE_WAYS stays, $1 too"));
         assertNull(DeliveryStatus.humanize(null));
     }
