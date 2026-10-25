@@ -17,7 +17,7 @@
 --
 -- Desktop needs no change: it already lists kind, category, title, body and the related booking.
 -- ORDER: after 20261025_01 and _02. Re-runnable. Adds 2 nullable columns and 1 index; changes no rows.
--- NOT APPLIED to production. Needs approval.
+-- APPLIED to production on 2026-10-25 with the owner's approval (migration 20261025_03_mobile_issue_reports).
 -- =====================================================================================================
 
 begin;

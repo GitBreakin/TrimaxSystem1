@@ -8,7 +8,7 @@
 --   * trigger functions are not checked for EXECUTE when a trigger fires (only when it is created), so
 --     revoking EXECUTE from the API roles leaves the triggers working while /rest/v1/rpc can no longer
 --     reach them.
--- NOT APPLIED to production. Needs approval.
+-- APPLIED to production on 2026-10-25 with the owner's approval (migration 20261025_02_search_path_and_trigger_privileges).
 -- =====================================================================================================
 
 begin;

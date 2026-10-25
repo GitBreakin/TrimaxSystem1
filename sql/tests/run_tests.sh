@@ -64,4 +64,17 @@ test "$(psql_owner -tAc "select count(*) from admin_notifications")" -gt 0 && ec
 psql_owner -f 20261025_02_search_path_and_trigger_privileges.sql
 psql_owner -f 20261025_03_mobile_issue_reports.sql
 echo "PASS stage B re-applies after rollback"
+
+echo "== Stage E: delivery proof photos (Storage stand-in first; migration twice: re-runnable)"
+psql_su -d "$DB" -f tests/39_storage_emulation.sql >/dev/null
+psql_owner -f 20261025_04_delivery_proofs.sql
+psql_owner -f 20261025_04_delivery_proofs.sql
+psql_su -d "$DB" -f tests/40_stage_e_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL STAGE E SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+echo "== Stage E rollback (part A), then re-apply"
+psql_owner -f 20261025_98_rollback_stage_e.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'trimax_driver_attach_proof'")" = "0" && echo "PASS stage E rollback removed trimax_driver_attach_proof"
+test "$(psql_owner -tAc "select count(*) from pg_policies where policyname like 'trimax delivery proof %'")" = "0" && echo "PASS stage E rollback removed the upload policies"
+test "$(psql_owner -tAc "select count(*) from delivery_proofs")" -gt 0 && echo "PASS stage E rollback kept the proofs"
+psql_owner -f 20261025_04_delivery_proofs.sql
+echo "PASS stage E re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"
