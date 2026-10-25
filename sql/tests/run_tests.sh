@@ -98,4 +98,14 @@ test "$(psql_owner -tAc "select count(*) from information_schema.columns where t
 psql_owner -c "select trimax_private.issue_media_ticket('marc.admin', 'duty-photos', '00000000-0000-0000-0000-00000000d0d0/start_1_aa.jpg')" >/dev/null && echo "PASS duty photo tickets still work after the rollback"
 psql_owner -f 20261025_06_product_images.sql
 echo "PASS stage F re-applies after rollback"
+echo "== Stage G: acknowledge / resolve alerts (twice: re-runnable)"
+psql_owner -f 20261025_07_alert_resolution.sql
+psql_owner -f 20261025_07_alert_resolution.sql
+psql_su -d "$DB" -f tests/43_alert_resolution_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL ALERT RESOLUTION SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+echo "== Stage G rollback (part A), then re-apply"
+psql_owner -f 20261025_95_rollback_alert_resolution.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'resolve_alert'")" = "0" && echo "PASS stage G rollback removed resolve_alert"
+test "$(psql_owner -tAc "select count(*) from admin_notifications where resolved_at is not null")" -gt 0 && echo "PASS stage G rollback kept the recorded resolutions"
+psql_owner -f 20261025_07_alert_resolution.sql
+echo "PASS stage G re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"

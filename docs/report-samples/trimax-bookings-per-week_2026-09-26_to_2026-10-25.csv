@@ -1,0 +1,17 @@
+﻿TRI-MAX report,Bookings per week
+"Period (Asia/Manila, both dates included)",2026-09-26 to 2026-10-25
+Generated for,unknown
+Generated at,2026-10-25 23:24 (Asia/Manila)
+Definition,"bookings are counted once, on the day created. Completion rate = Completed / all created; Cancellation rate = Cancelled / all created; n/a when nothing was created."
+Weeks start on Monday. The first and last period count only the days inside the range.
+
+Period,Created,Completed,Cancelled,"Value (PHP, excl. cancelled)"
+Week 39 (from 2026-09-21),4,3,0,5000.00
+Week 40 (from 2026-09-28),11,8,2,11250.00
+Week 41 (from 2026-10-05),11,7,1,12500.00
+Week 42 (from 2026-10-12),11,8,0,13750.00
+Week 43 (from 2026-10-19),10,2,1,11250.00
+
+Total,47,28,4,53750.00
+Completion rate,59.6%
+Cancellation rate,8.5%
