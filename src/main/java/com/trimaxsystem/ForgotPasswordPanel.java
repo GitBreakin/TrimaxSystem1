@@ -71,7 +71,7 @@ public class ForgotPasswordPanel extends JPanel {
         JLabel lblRemember = new JLabel("Remember your password?");
         lblRemember.setFont(new Font("SansSerif", Font.PLAIN, 12));
         lblRemember.setForeground(Color.decode("#334155"));
-        JButton btnReturn1 = AuthUI.button("Return to Login", 140, 36, 12, Font.PLAIN);
+        JButton btnReturn1 = AuthUI.secondary(AuthUI.button("Return to Login", 140, 36, 12, Font.PLAIN));
         btnReturn1.addActionListener(e -> parentFrame.showCard("LOGIN"));
         requestNav.add(lblRemember, BorderLayout.WEST);
         requestNav.add(btnReturn1, BorderLayout.EAST);
@@ -127,7 +127,7 @@ public class ForgotPasswordPanel extends JPanel {
         resetNav.setOpaque(false);
         JButton btnStartOver = AuthUI.button("Start over", 110, 36, 12, Font.PLAIN);
         btnStartOver.addActionListener(e -> showStep(STEP_REQUEST));
-        JButton btnReturn2 = AuthUI.button("Return to Login", 140, 36, 12, Font.PLAIN);
+        JButton btnReturn2 = AuthUI.secondary(AuthUI.button("Return to Login", 140, 36, 12, Font.PLAIN));
         btnReturn2.addActionListener(e -> parentFrame.showCard("LOGIN"));
         resetNav.add(btnStartOver, BorderLayout.WEST);
         resetNav.add(btnReturn2, BorderLayout.EAST);

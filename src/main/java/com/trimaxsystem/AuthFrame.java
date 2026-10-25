@@ -19,66 +19,46 @@ public class AuthFrame extends JFrame {
         setIconImages(BrandLogo.createWindowIcons());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);   // a resizable, maximized window leaves the taskbar visible
-        setMinimumSize(new Dimension(1000, 700));  // (and uses the full screen when the taskbar is hidden)
+        setMinimumSize(new Dimension(820, 680));   // below ~1100 px wide the brand panel hides itself
 
-        // Main background panel with GridBagLayout to keep both sides centered as a pair
-        JPanel mainContainer = new JPanel(new GridBagLayout());
-        mainContainer.setBackground(Color.decode("#FFFFFF"));
+        // Left: brand panel (navy gradient). Right: the sign-in card centred on a light background.
+        LoginBrandPanel brandPanel = new LoginBrandPanel();
+        JPanel mainContainer = new JPanel(new BorderLayout());
+        mainContainer.add(brandPanel, BorderLayout.WEST);
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(20, 40, 20, 40); // Spacing between logo and card
-        gbc.anchor = GridBagConstraints.CENTER;
+        JPanel workArea = new JPanel(new GridBagLayout());
+        workArea.setBackground(AuthUI.PAGE_BG);
+        mainContainer.add(workArea, BorderLayout.CENTER);
 
-        // --- LEFT SIDE: LOGO PANEL ---
-        JPanel logoPanel = new JPanel(new GridBagLayout());
-        logoPanel.setOpaque(false);
-        logoPanel.setPreferredSize(new Dimension(400, 580)); // Match height of card panel
-
-        JPanel branding = new JPanel();
-        branding.setOpaque(false);
-        branding.setLayout(new BoxLayout(branding, BoxLayout.Y_AXIS));
-        branding.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 40));
-
-        JLabel logoLabel = new JLabel(BrandLogo.createIcon(320, 256));
-        logoLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        branding.add(logoLabel);
-        branding.add(Box.createVerticalStrut(16));
-
-        Color brandText = Color.decode("#080F6D");
-        JLabel brandName = new JLabel("TRI - MAX");
-        brandName.setFont(Theme.BRAND.deriveFont(58f));
-        brandName.setForeground(brandText);
-        brandName.setAlignmentX(Component.CENTER_ALIGNMENT);
-        branding.add(brandName);
-
-        JLabel brandDescription = new JLabel("Goods Trading");
-        brandDescription.setFont(Theme.BRAND.deriveFont(38f));
-        brandDescription.setForeground(brandText);
-        brandDescription.setAlignmentX(Component.CENTER_ALIGNMENT);
-        branding.add(brandDescription);
-
-        logoPanel.add(branding);
-
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        mainContainer.add(logoPanel, gbc);
-
-        // --- RIGHT SIDE: CARD LAYOUT CONTAINER ---
+        // Card switcher: sign in, forgot password, register (not linked from sign-in), loading
         cardLayout = new CardLayout();
         centerCardPanel = new JPanel(cardLayout);
-        centerCardPanel.setPreferredSize(new Dimension(420, 580));
+        centerCardPanel.setOpaque(false);
+        centerCardPanel.setPreferredSize(new Dimension(420, 560));
 
         // Instantiate child panels, passing 'this' frame reference
         loginPanel = new LoginPanel(this);
         forgotPasswordPanel = new ForgotPasswordPanel(this);
         registerPanel = new RegisterPanel(this);
 
-        // Shown while a remembered session is being checked
+        // Shown while a remembered session is being checked or the main window is loading
         JPanel loadingPanel = new JPanel(new GridBagLayout());
         loadingPanel.setBackground(AuthUI.PANEL_BG);
-        loadingLabel.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        loadingLabel.setFont(new Font("SansSerif", Font.PLAIN, 15));
         loadingLabel.setForeground(AuthUI.MUTED);
-        loadingPanel.add(loadingLabel);
+        JProgressBar progress = new JProgressBar();
+        progress.setIndeterminate(true);
+        progress.setPreferredSize(new Dimension(220, 6));
+        progress.setBorderPainted(false);
+        progress.setForeground(AuthUI.BLUE);
+        progress.getAccessibleContext().setAccessibleName("Loading");
+        GridBagConstraints lc = new GridBagConstraints();
+        lc.gridx = 0;
+        lc.gridy = 0;
+        loadingPanel.add(loadingLabel, lc);
+        lc.gridy = 1;
+        lc.insets = new Insets(16, 0, 0, 0);
+        loadingPanel.add(progress, lc);
 
         // Add views to CardLayout (the first one added is the one shown first)
         centerCardPanel.add(loginPanel, "LOGIN");
@@ -86,9 +66,35 @@ public class AuthFrame extends JFrame {
         centerCardPanel.add(registerPanel, "REGISTER");
         centerCardPanel.add(loadingPanel, "LOADING");
 
-        gbc.gridx = 1;
+        CardShell card = new CardShell();
+        card.add(centerCardPanel, BorderLayout.CENTER);
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
         gbc.gridy = 0;
-        mainContainer.add(centerCardPanel, gbc);
+        gbc.anchor = GridBagConstraints.CENTER;
+        workArea.add(card, gbc);
+
+        String version = AuthFrame.class.getPackage() != null && AuthFrame.class.getPackage().getImplementationVersion() != null
+                ? AuthFrame.class.getPackage().getImplementationVersion() : "1.0";
+        JLabel footer = new JLabel("\u00A9 " + java.time.Year.now(Theme.BUSINESS_TZ) + " TRI-MAX Goods Trading  \u00B7  Admin Console " + version);
+        footer.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        footer.setForeground(AuthUI.MUTED);
+        gbc.gridy = 1;
+        gbc.insets = new Insets(14, 0, 0, 0);
+        workArea.add(footer, gbc);
+
+        // Responsive: the brand panel takes ~42% of the width and hides on narrow windows.
+        mainContainer.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                int w = mainContainer.getWidth();
+                boolean show = w >= 1100;
+                brandPanel.setPreferredSize(new Dimension(Math.max(460, (int) (w * 0.42)), 10));
+                if (brandPanel.isVisible() != show) brandPanel.setVisible(show);
+                mainContainer.revalidate();
+            }
+        });
 
         // Add container to JFrame
         add(mainContainer);
@@ -187,6 +193,37 @@ public class AuthFrame extends JFrame {
                     if (currentWindow != null) currentWindow.dispose();
                     new AuthFrame();
                 });
+    }
+
+    /** White rounded card with a soft shadow that holds the sign-in screens. */
+    private static final class CardShell extends JPanel {
+        private static final int SHADOW = 18;
+
+        CardShell() {
+            super(new BorderLayout());
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder(SHADOW, SHADOW, SHADOW + 4, SHADOW));
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int w = getWidth(), h = getHeight();
+                // soft shadow: stacked translucent rounded rectangles, darker toward the card
+                for (int i = SHADOW; i > 0; i -= 2) {
+                    g2.setColor(new Color(15, 23, 42, Math.max(1, 7 - i / 3)));
+                    g2.fill(new java.awt.geom.RoundRectangle2D.Double(SHADOW - i, SHADOW - i + 6, w - 2 * (SHADOW - i), h - 2 * (SHADOW - i) - 6, 22 + i, 22 + i));
+                }
+                g2.setColor(AuthUI.PANEL_BG);
+                g2.fill(new java.awt.geom.RoundRectangle2D.Double(SHADOW, SHADOW, w - 2 * SHADOW, h - 2 * SHADOW - 4, 22, 22));
+                g2.setColor(Color.decode("#E3E9F3"));
+                g2.draw(new java.awt.geom.RoundRectangle2D.Double(SHADOW + 0.5, SHADOW + 0.5, w - 2 * SHADOW - 1, h - 2 * SHADOW - 5, 22, 22));
+            } finally {
+                g2.dispose();
+            }
+        }
     }
 
     public static void main(String[] args) {
