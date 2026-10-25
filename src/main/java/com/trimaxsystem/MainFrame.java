@@ -24,6 +24,7 @@ public class MainFrame extends JFrame {
             {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions (current / stale)"},
             {"Manage Vehicles", "Manage Vehicles", "Vehicle records, status, and driver assignments"},
             {"Agents & Drivers", "Agents & Drivers", "Accounts, roles and account status"},
+            {"Attendance", "Attendance", "Start and end of duty from the mobile app, with photo, time and location"},
             {"Customers", "Customers", "Customer records, assigned agents and locations"},
             {"Analytics & Reports", "Analytics & Reports", "Booking volume, completion and cancellation, with CSV, Excel and PDF export"},
             {"Notifications", "Notifications", "Operational alerts and announcements"},
@@ -38,6 +39,7 @@ public class MainFrame extends JFrame {
     private final JLabel breadcrumbLabel = new JLabel();
     private final JButton bell = headerIconButton(new HeaderIcon(true, 0), "Notifications");
     private NotificationsPanel notificationsPanel;
+    private AttendancePanel attendancePanel;
     private final NavButton[] navButtons = new NavButton[PAGES.length];
 
     /**
@@ -68,12 +70,14 @@ public class MainFrame extends JFrame {
         mainContentPanel.add(buildLiveGpsPage(), PAGES[3][0]);
         mainContentPanel.add(new ManageVehiclesPanel(), PAGES[4][0]);
         mainContentPanel.add(new AccountsPanel(), PAGES[5][0]);
-        mainContentPanel.add(new ClientsPanel(), PAGES[6][0]);
-        mainContentPanel.add(new AnalyticsPanel(), PAGES[7][0]);
+        attendancePanel = new AttendancePanel();
+        mainContentPanel.add(attendancePanel, PAGES[ATTENDANCE_PAGE][0]);
+        mainContentPanel.add(new ClientsPanel(), PAGES[7][0]);
+        mainContentPanel.add(new AnalyticsPanel(), PAGES[8][0]);
         notificationsPanel = new NotificationsPanel(this::refreshBell);
-        mainContentPanel.add(notificationsPanel, PAGES[8][0]);
-        mainContentPanel.add(new AuditLogsPanel(), PAGES[9][0]);
-        mainContentPanel.add(new SettingsPanel(), PAGES[10][0]);
+        mainContentPanel.add(notificationsPanel, PAGES[NOTIFICATIONS_PAGE][0]);
+        mainContentPanel.add(new AuditLogsPanel(), PAGES[10][0]);
+        mainContentPanel.add(new SettingsPanel(), PAGES[11][0]);
 
         JPanel right = new JPanel(new BorderLayout());
         right.setBackground(Theme.BACKGROUND);
@@ -202,7 +206,8 @@ public class MainFrame extends JFrame {
         return header;
     }
 
-    private static final int NOTIFICATIONS_PAGE = 8;
+    private static final int ATTENDANCE_PAGE = 6;
+    private static final int NOTIFICATIONS_PAGE = 9;
 
     /**
      * Updates the bell's unread count. If the count cannot be known (table missing, database error) the
@@ -350,6 +355,7 @@ public class MainFrame extends JFrame {
         cardLayout.show(mainContentPanel, PAGES[index][0]);
         titleLabel.setText(PAGES[index][1]);
         if (index == NOTIFICATIONS_PAGE && notificationsPanel != null) notificationsPanel.reload();
+        if (index == ATTENDANCE_PAGE && attendancePanel != null) attendancePanel.reload();
         if (index != NOTIFICATIONS_PAGE) refreshBell();
         breadcrumbLabel.setText("TRI-MAX  >  " + PAGES[index][1]);
         subtitleLabel.setText(PAGES[index][2]);

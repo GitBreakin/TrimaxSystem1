@@ -8,6 +8,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_01` live baseline | Describes production; nothing to apply |
 | `_02`, `_03` | **Applied 2026-10-25**, with the owner's approval |
 | `_04` delivery proofs | **Applied 2026-10-25**, with the owner's approval |
+| `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Not applied / not deployed.** Needs approval |
 
 ## Files (run in this order)
 
@@ -17,6 +18,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `sql/20261025_02_search_path_and_trigger_privileges.sql` | Pins `search_path` on the 4 functions the Supabase advisor flags; API roles can no longer call the 2 trigger functions | Settings only, no data |
 | `sql/20261025_03_mobile_issue_reports.sql` | `public.trimax_report_issue(...)`: SOS and problem reports from the app become rows in `admin_notifications`, which the desktop Notifications screen already lists. Adds 2 nullable columns + 2 indexes | Additive, no data |
 | `sql/20261025_04_delivery_proofs.sql` | Stage E. Private `delivery-proofs` bucket (JPEG, 5 MB, own-folder upload/read for phones), table `public.delivery_proofs` (RLS on, no phone access), `public.trimax_driver_attach_proof(...)`: the assigned driver attaches a drop-off photo to a started/delivered booking, the server checks the file is really in his folder, max 5 per booking, safe retries | Additive: 1 table, 1 bucket, 2 policies, 2 functions |
+| `sql/20261025_05_admin_media_tickets.sql` | Desktop photo viewing without any storage key on the PC: `trimax_private.media_tickets`, `trimax_private.issue_media_ticket(admin, bucket, path)` (owner only: Active Admin, photo must exist, audited as `media.view`) and `public.trimax_service_redeem_media_ticket(ticket)` (service role only, one use, 2 minutes). Used with the Edge Function in `supabase/functions/trimax-admin-media` | Additive: 1 private table, 2 functions |
+| `sql/20261025_97_rollback_media_tickets.sql` | Undoes `_05` (tickets are short-lived; audit rows stay) | — |
 | `sql/20261025_98_rollback_stage_e.sql` | Undoes `_04` (part A keeps proofs and photos; part B, commented, drops the table) | — |
 | `sql/20261025_99_rollback_stage_b.sql` | Undoes `_02` and `_03` (part A keeps data; part B, commented, drops the new columns) | — |
 
@@ -70,3 +73,17 @@ below are kept for a fresh project.
    their own. Completing deliveries never depends on it.
 4. Viewing the photos in the Desktop is a later step: the Desktop has no Storage access yet, and no
    storage key goes into any client code.
+
+### `_05` + Edge Function `trimax-admin-media` (after approval)
+
+1. SQL Editor: run `20261025_05_admin_media_tickets.sql`.
+2. Deploy `supabase/functions/trimax-admin-media` (`index.ts` + `handler.ts`) with **verify_jwt = false**:
+   the Desktop has no Supabase sign-in; the one-time ticket is the authorization. The function reads the
+   project's secret key from its own environment (`SUPABASE_SECRET_KEYS`, or the legacy
+   `SUPABASE_SERVICE_ROLE_KEY`), never from a PC.
+3. Desktop: nothing to configure. The project URL is worked out from `db.user`; `supabase.url` in
+   `trimax.properties` can override it.
+
+Tests: `sql/tests/41_media_tickets_tests.sql` (in `run_tests.sh`) and
+`node --experimental-strip-types supabase/functions/trimax-admin-media/test_handler.mjs` (Node 22+, fake
+Supabase on localhost; 13 checks).

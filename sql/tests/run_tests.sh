@@ -77,4 +77,13 @@ test "$(psql_owner -tAc "select count(*) from pg_policies where policyname like 
 test "$(psql_owner -tAc "select count(*) from delivery_proofs")" -gt 0 && echo "PASS stage E rollback kept the proofs"
 psql_owner -f 20261025_04_delivery_proofs.sql
 echo "PASS stage E re-applies after rollback"
+
+echo "== Admin photo tickets (twice: re-runnable)"
+psql_owner -f 20261025_05_admin_media_tickets.sql
+psql_owner -f 20261025_05_admin_media_tickets.sql
+psql_su -d "$DB" -f tests/41_media_tickets_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL MEDIA TICKET SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+psql_owner -f 20261025_97_rollback_media_tickets.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('issue_media_ticket','trimax_service_redeem_media_ticket')")" = "0" && echo "PASS ticket rollback removed both functions"
+psql_owner -f 20261025_05_admin_media_tickets.sql
+echo "PASS tickets re-apply after rollback"
 echo "ALL DATABASE TESTS PASSED"

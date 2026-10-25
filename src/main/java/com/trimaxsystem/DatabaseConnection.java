@@ -29,6 +29,32 @@ public class DatabaseConnection {
         return DriverManager.getConnection(require("TRIMAX_DB_URL", "db.url"), props);
     }
 
+    /**
+     * The Supabase project URL (not a secret), e.g. https://abcd.supabase.co, used to reach Edge Functions.
+     * TRIMAX_SUPABASE_URL or "supabase.url" wins; otherwise it is worked out from the pooler user name
+     * "postgres.&lt;project ref&gt;". Throws when neither is available.
+     */
+    public static String supabaseUrl() throws SQLException {
+        String value = System.getenv("TRIMAX_SUPABASE_URL");
+        if (value == null || value.isBlank()) value = loadFile().getProperty("supabase.url");
+        if (value != null && !value.isBlank()) {
+            value = value.trim();
+            while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+            boolean local = value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:");
+            if (!value.startsWith("https://") && !local) {
+                throw new SQLException("supabase.url must start with https://");
+            }
+            return value;
+        }
+        String user = require("TRIMAX_DB_USER", "db.user");
+        int dot = user.indexOf('.');
+        String ref = dot > 0 ? user.substring(dot + 1) : "";
+        if (!ref.matches("[a-z0-9]{10,40}")) {
+            throw new SQLException("Set \"supabase.url\" in trimax.properties (for example https://<project>.supabase.co).");
+        }
+        return "https://" + ref + ".supabase.co";
+    }
+
     /** Environment variable wins; otherwise the properties file. Never logs the value. */
     private static String require(String envName, String fileKey) throws SQLException {
         String value = System.getenv(envName);
