@@ -7,7 +7,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | --- | --- |
 | `_01` live baseline | Describes production; nothing to apply |
 | `_02`, `_03` | **Applied 2026-10-25**, with the owner's approval |
-| `_04` delivery proofs | **Not applied.** Needs approval |
+| `_04` delivery proofs | **Applied 2026-10-25**, with the owner's approval |
 
 ## Files (run in this order)
 
@@ -56,7 +56,13 @@ audit log; then rollback part A and re-apply. Result on 2026-10-25: **ALL DATABA
 4. The Android app needs a matching release that calls `trimax_report_issue`; until then nothing writes
    to the new function.
 
-### `_04` (Stage E, after approval)
+### `_04` (Stage E): applied 2026-10-25
+
+Applied with the Supabase migration tool as `20261025_04_delivery_proofs`. Checked afterwards:
+`trimax_driver_attach_proof` and `storage_object_uploaded` match this file (md5 of
+`pg_get_functiondef`); bucket private, JPEG only, 5 MB; 2 own-folder policies; RLS on, phones cannot
+read the table; only `authenticated` can call the function; no existing rows changed. The steps
+below are kept for a fresh project.
 
 1. SQL Editor: paste and run `20261025_04_delivery_proofs.sql` (one transaction, re-runnable).
 2. Check: Storage lists a private `delivery-proofs` bucket; Advisors show nothing new.

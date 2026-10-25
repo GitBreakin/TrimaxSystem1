@@ -25,7 +25,8 @@
 --
 -- ORDER: after 20261025_01, _02, _03. Re-runnable. Creates 1 table, 1 bucket, 2 storage policies,
 -- 2 functions. Changes no existing rows.
--- NOT APPLIED to production. Needs approval.
+-- APPLIED to production on 2026-10-25 with the owner's approval (migration 20261025_04_delivery_proofs).
+-- Verified after applying: function fingerprints match this file; bucket private, JPEG, 5 MB; 2 policies.
 -- =====================================================================================================
 
 begin;
