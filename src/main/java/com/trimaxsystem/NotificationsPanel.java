@@ -8,33 +8,35 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 
 /**
- * Admin notifications: operational alerts and announcements, with read / unread state. The Kind column keeps
- * the two apart in words, not just colour. This page only shows what is in the database; it cannot send
- * announcements, and nothing here claims anything was delivered to anyone.
+ * Admin notifications: operational alerts (SOS / problem reports from the mobile app) and announcements.
+ * Alerts go Unread -> Acknowledged (marked read) -> Resolved (with a note of what was done, by whom, when).
+ * The Kind and Status columns say this in words, not just colour. This page only shows what is in the
+ * database; it cannot send announcements, and nothing here claims anything was delivered to anyone.
  */
 public class NotificationsPanel extends JPanel {
 
-    private final JComboBox<String> filter = new JComboBox<>(new String[]{"All", "Unread only"});
+    private final JComboBox<String> filter = new JComboBox<>(new String[]{"All", "Unread only", "Open alerts"});
     private final JButton refresh = UiKit.secondaryButton("Refresh");
     private final JButton markOne = UiKit.secondaryButton("Mark selected as read");
     private final JButton markAll = UiKit.secondaryButton("Mark all as read");
+    private final JButton resolve = UiKit.secondaryButton("Resolve alert...");
     private final JLabel info = new JLabel(" ");
     private final StatePanel state = new StatePanel();
     private final CardLayout cards = new CardLayout();
     private final JPanel center = new JPanel(cards);
     private final DefaultTableModel model = new DefaultTableModel(
-            new String[]{"Status", "When (Asia/Manila)", "Kind", "Category", "Title", "Related record"}, 0) {
+            new String[]{"Status", "When (Asia/Manila)", "Kind", "Category", "Title", "Reported by", "Related record"}, 0) {
         @Override
         public boolean isCellEditable(int r, int c) {
             return false;
         }
     };
     private final JTable table = new JTable(model);
-    private final JTextArea detail = new JTextArea(4, 40);
+    private final JTextArea detail = new JTextArea(9, 40);
     private final Runnable onChanged;
     private List<NotificationService.Item> shown = new ArrayList<>();
     private int seq;
-    private boolean busy, loadedOnce;
+    private boolean busy, loadedOnce, resolutionAvailable;
 
     /** onChanged is called after the unread count may have changed (so the header bell can refresh). */
     public NotificationsPanel(Runnable onChanged) {
@@ -50,6 +52,7 @@ public class NotificationsPanel extends JPanel {
         top.add(refresh);
         top.add(markOne);
         top.add(markAll);
+        top.add(resolve);
         top.add(info);
         add(top, BorderLayout.NORTH);
 
@@ -57,19 +60,21 @@ public class NotificationsPanel extends JPanel {
         refresh.addActionListener(e -> load());
         markOne.addActionListener(e -> markSelected());
         markAll.addActionListener(e -> markAllRead());
+        resolve.addActionListener(e -> resolveSelected());
+        markOne.setToolTipText("For an alert this means acknowledged: the office has seen it");
+        filter.setToolTipText("Open alerts = SOS and problem reports that nobody has resolved yet");
         table.setRowHeight(24);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
+            updateButtons();
             int r = table.getSelectedRow();
             if (r < 0 || r >= shown.size()) {
                 detail.setText("");
                 return;
             }
-            NotificationService.Item it = shown.get(r);
-            detail.setText(it.title + "\n\n" + (it.body == null ? "(no details)" : it.body)
-                    + (it.unread() ? "" : "\n\nRead " + Theme.formatWhen(it.readAt)
-                    + (it.readBy == null ? "" : " by " + it.readBy)));
+            detail.setText(details(shown.get(r)));
+            detail.setCaretPosition(0);
         });
         detail.setEditable(false);
         detail.setLineWrap(true);
@@ -96,6 +101,47 @@ public class NotificationsPanel extends JPanel {
     private void setButtons(boolean on) {
         markOne.setEnabled(on);
         markAll.setEnabled(on);
+        resolve.setEnabled(on);
+    }
+
+    private NotificationService.Item selected() {
+        int r = table.getSelectedRow();
+        return r < 0 || r >= shown.size() ? null : shown.get(r);
+    }
+
+    /** Buttons follow the selected row: only what can be done to it is enabled, with the reason as a tooltip. */
+    private void updateButtons() {
+        if (busy) return;
+        NotificationService.Item it = selected();
+        markOne.setEnabled(it != null && it.unread());
+        markAll.setEnabled(unread > 0);
+        boolean canResolve = resolutionAvailable && it != null && it.isAlert() && !it.resolved();
+        resolve.setEnabled(canResolve);
+        resolve.setToolTipText(!resolutionAvailable
+                ? "Needs the database update sql/20261025_07_alert_resolution.sql"
+                : it == null ? "Select an alert first"
+                : !it.isAlert() ? "Only alerts are resolved; announcements are just marked read"
+                : it.resolved() ? "Already resolved" : "Record what was done about this alert");
+    }
+
+    static String details(NotificationService.Item it) {
+        StringBuilder b = new StringBuilder(it.title == null ? "" : it.title);
+        b.append("\n\n").append(it.body == null ? "(no details)" : it.body);
+        b.append("\n\n").append(it.kind).append(it.category == null ? "" : " - " + it.category)
+                .append(", sent ").append(Theme.formatWhen(it.createdAt));
+        if (it.reportedBy != null) b.append(" by ").append(it.reportedBy);
+        if (!it.related().isEmpty()) b.append(" (").append(it.related()).append(")");
+        b.append(it.unread() ? "\nNot acknowledged yet."
+                : "\n" + (it.isAlert() ? "Acknowledged " : "Read ") + Theme.formatWhen(it.readAt)
+                + (it.readBy == null ? "" : " by " + it.readBy));
+        if (it.resolved()) {
+            b.append("\nResolved ").append(Theme.formatWhen(it.resolvedAt))
+                    .append(it.resolvedBy == null ? "" : " by " + it.resolvedBy)
+                    .append(":\n").append(it.resolutionNote == null ? "" : it.resolutionNote);
+        } else if (it.isAlert()) {
+            b.append("\nNot resolved yet.");
+        }
+        return b.toString();
     }
 
     /** Called by the main window each time this page is opened, so the list is never silently out of date. */
@@ -105,21 +151,21 @@ public class NotificationsPanel extends JPanel {
 
     private void load() {
         final int mySeq = ++seq;
-        final boolean unreadOnly = filter.getSelectedIndex() == 1;
+        final NotificationService.Filter which = NotificationService.Filter.values()[Math.max(0, filter.getSelectedIndex())];
         setButtons(false);
         state.showLoading("Loading notifications...");
         cards.show(center, "state");
         new SwingWorker<NotificationService.Result, Void>() {
             @Override
             protected NotificationService.Result doInBackground() throws Exception {
-                return NotificationService.load(unreadOnly);
+                return NotificationService.load(which);
             }
 
             @Override
             protected void done() {
                 if (mySeq != seq) return;
                 try {
-                    show(get(), unreadOnly);
+                    show(get(), which);
                 } catch (Exception ex) {
                     Throwable c = ex.getCause() != null ? ex.getCause() : ex;
                     shown = new ArrayList<>();
@@ -131,7 +177,9 @@ public class NotificationsPanel extends JPanel {
         }.execute();
     }
 
-    private void show(NotificationService.Result r, boolean unreadOnly) {
+    private int unread;
+
+    private void show(NotificationService.Result r, NotificationService.Filter which) {
         if (r.tableMissing) {
             shown = new ArrayList<>();
             state.showEmpty("Notifications are not set up yet",
@@ -141,20 +189,98 @@ public class NotificationsPanel extends JPanel {
             return;
         }
         shown = r.items;
+        unread = r.unread;
+        resolutionAvailable = r.resolutionAvailable;
+        String counts = "Unread: " + r.unread
+                + (r.resolutionAvailable ? "   Open alerts: " + r.openAlerts : "   Resolving alerts: not set up yet");
+        info.setText(counts + (r.truncated ? "   (showing the newest 200)" : ""));
+        info.setToolTipText(r.resolutionAvailable ? null
+                : "Needs the database update sql/20261025_07_alert_resolution.sql; alerts can still be marked read");
         if (shown.isEmpty()) {
-            state.showEmpty(unreadOnly ? "No unread notifications" : "No notifications yet", null);
+            state.showEmpty(which == NotificationService.Filter.UNREAD ? "No unread notifications"
+                            : which == NotificationService.Filter.OPEN_ALERTS ? "No open alerts" : "No notifications yet",
+                    which == NotificationService.Filter.OPEN_ALERTS ? "Every SOS and problem report has been resolved." : null);
             cards.show(center, "state");
-            info.setText("Unread: " + r.unread);
+            setButtons(false);
+            markAll.setEnabled(r.unread > 0);
             return;
         }
         model.setRowCount(0);
         for (NotificationService.Item it : shown) {
-            model.addRow(new Object[]{it.unread() ? "UNREAD" : "Read", Theme.formatWhen(it.createdAt), it.kind,
-                    it.category, it.title, it.related()});
+            model.addRow(new Object[]{it.stateText(), Theme.formatWhen(it.createdAt), it.kind,
+                    it.category, it.title, it.reportedBy == null ? "" : it.reportedBy, it.related()});
         }
-        info.setText("Unread: " + r.unread + (r.truncated ? "   (showing the newest 200)" : ""));
-        setButtons(r.unread > 0);
+        detail.setText("");
+        updateButtons();
         cards.show(center, "content");
+    }
+
+    private void resolveSelected() {
+        NotificationService.Item it = selected();
+        if (it == null || !it.isAlert() || it.resolved() || !resolutionAvailable || busy) return;
+        JTextArea note = new JTextArea(5, 36);
+        note.setLineWrap(true);
+        note.setWrapStyleWord(true);
+        JLabel count = new JLabel("0 / " + NotificationService.MAX_NOTE);
+        count.setForeground(Theme.MUTED);
+        note.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void upd() {
+                int n = note.getText().trim().length();
+                count.setText(n + " / " + NotificationService.MAX_NOTE);
+                count.setForeground(n > NotificationService.MAX_NOTE ? Theme.DANGER : Theme.MUTED);
+            }
+
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { upd(); }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { upd(); }
+
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { upd(); }
+        });
+        JPanel p = new JPanel(new BorderLayout(0, 6));
+        JLabel head = new JLabel("<html><b>" + esc(it.title) + "</b><br>Sent " + esc(Theme.formatWhen(it.createdAt))
+                + (it.reportedBy == null ? "" : " by " + esc(it.reportedBy))
+                + "<br><br>What was done? (saved with your name and the time; it cannot be edited later)</html>");
+        p.add(head, BorderLayout.NORTH);
+        p.add(new JScrollPane(note), BorderLayout.CENTER);
+        p.add(count, BorderLayout.SOUTH);
+        while (true) {
+            int ok = JOptionPane.showConfirmDialog(this, p, "Resolve alert", JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE);
+            if (ok != JOptionPane.OK_OPTION) return;
+            String bad = NotificationService.checkNote(note.getText());
+            if (bad == null) break;
+            JOptionPane.showMessageDialog(this, bad, "Resolve alert", JOptionPane.WARNING_MESSAGE);
+        }
+        final String text = note.getText();
+        busy = true;
+        setButtons(false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                NotificationService.resolve(it.id, text);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                try {
+                    get();
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    JOptionPane.showMessageDialog(NotificationsPanel.this,
+                            c instanceof NotificationService.ResolveException ? c.getMessage()
+                                    : "The alert was NOT resolved: " + c.getMessage(),
+                            "Resolve alert", JOptionPane.ERROR_MESSAGE);
+                }
+                load();   // always show what the database says now (also when someone else resolved it first)
+                if (onChanged != null) onChanged.run();
+            }
+        }.execute();
+    }
+
+    private static String esc(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void markSelected() {
