@@ -50,4 +50,18 @@ test "$(psql_owner -tAc "select count(*) from bookings where created_via = 'mobi
 psql_owner -c "update bookings set driver_username = 'driver.dee', vehicle_id = 'TRK-002' where booking_id = 1" >/dev/null && echo "PASS desktop assignment works after rollback"
 psql_owner -f 20261023_01_mobile_booking_integration.sql
 echo "PASS migration re-applies after rollback"
+
+echo "== Stage B: live baseline, search_path fixes, SOS / problem reports (each twice: re-runnable)"
+for f in 20261025_01_live_baseline.sql 20261025_02_search_path_and_trigger_privileges.sql 20261025_03_mobile_issue_reports.sql; do
+    psql_owner -f "$f"
+    psql_owner -f "$f"
+done
+psql_su -d "$DB" -f tests/30_stage_b_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL STAGE B SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+echo "== Stage B rollback (part A), then re-apply"
+psql_owner -f 20261025_99_rollback_stage_b.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'trimax_report_issue'")" = "0" && echo "PASS stage B rollback removed trimax_report_issue"
+test "$(psql_owner -tAc "select count(*) from admin_notifications")" -gt 0 && echo "PASS stage B rollback kept the alerts"
+psql_owner -f 20261025_02_search_path_and_trigger_privileges.sql
+psql_owner -f 20261025_03_mobile_issue_reports.sql
+echo "PASS stage B re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"

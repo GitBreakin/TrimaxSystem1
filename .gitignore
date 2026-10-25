@@ -39,3 +39,6 @@ build/
 .DS_Store
 
 trimax.properties
+
+### TRIMAX runtime output (customer data: never commit) ###
+receipts/
