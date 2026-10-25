@@ -10,12 +10,19 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     seen.push({ method: req.method, url: req.url, apikey: req.headers["apikey"], auth: req.headers["authorization"], body });
     if (req.url === "/rest/v1/rpc/trimax_service_redeem_media_ticket") {
+      if (mode === "upload") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"product-images","path":"products/7/abc123.jpg","action":"upload"}'); }
+      if (mode === "delete" || mode === "delete-gone") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"product-images","path":"products/7/old999.jpg","action":"delete"}'); }
       if (mode === "expired") { res.writeHead(400, { "Content-Type": "application/json" }); return res.end('{"code":"TM403","message":"expired"}'); }
       if (mode === "weird") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"other","path":"x/../y.jpg"}'); }
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end('{"bucket":"duty-photos","path":"00000000-0000-0000-0000-00000000d0d0/start_1_ab.jpg"}');
     }
     if (req.url.startsWith("/storage/v1/object/")) {
+      seen[seen.length - 1].type = req.headers["content-type"];
+      seen[seen.length - 1].upsert = req.headers["x-upsert"];
+      seen[seen.length - 1].bytes = body.length;
+      if (mode === "delete-gone") { res.writeHead(400, { "Content-Type": "application/json" }); return res.end('{"statusCode":"404","error":"not_found"}'); }
+      if (mode === "upload" || mode === "delete") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"Key":"x"}'); }
       if (mode === "gone") { res.writeHead(400, { "Content-Type": "application/json" }); return res.end('{"statusCode":"404","error":"not_found"}'); }
       res.writeHead(200, { "Content-Type": "image/jpeg" });
       return res.end(JPEG);
@@ -59,6 +66,35 @@ check(r.status === 502 && seen.length === 1, "unexpected bucket/path from the da
 mode = "gone";
 r = await handle(post(JSON.stringify({ ticket: T })));
 check(r.status === 404, "photo deleted from storage: 404");
+// ---- product pictures (Stage F)
+env.SUPABASE_SERVICE_ROLE_KEY = "eyJlegacy.jwt.key";
+const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(5000, 7)]);
+const up = (bytes, ticket = T) => new Request("http://edge/trimax-admin-media", { method: "POST", body: bytes,
+  headers: { "Content-Type": "image/jpeg", "x-trimax-ticket": ticket } });
+mode = "upload"; seen.length = 0;
+r = await handle(up(jpeg));
+let upBody = await r.json();
+check(r.status === 200 && upBody.path === "products/7/abc123.jpg", "upload ticket: picture stored at the ticket's path");
+check(seen[1] && seen[1].method === "POST" && seen[1].url === "/storage/v1/object/product-images/products/7/abc123.jpg"
+      && seen[1].type === "image/jpeg" && seen[1].upsert === "false", "stored as image/jpeg, never overwriting");
+seen.length = 0;
+r = await handle(up(Buffer.from("GIF89a not a jpeg")));
+check(r.status === 415 && seen.length === 0, "not a JPEG: refused before the ticket is used");
+r = await handle(up(Buffer.alloc(2 * 1024 * 1024 + 1, 0xff)));
+check(r.status === 413 && seen.length === 0, "over 2 MB: refused before the ticket is used");
+r = await handle(up(jpeg, "nope"));
+check(r.status === 400 && seen.length === 0, "upload without a valid ticket header: refused");
+mode = "ok"; seen.length = 0;
+r = await handle(up(jpeg));
+check(r.status === 403 && seen.length === 1, "a view ticket cannot be used to upload (storage untouched)");
+mode = "delete"; seen.length = 0;
+r = await handle(post(JSON.stringify({ ticket: T })));
+check(r.status === 200 && seen[1].method === "DELETE" && seen[1].url === "/storage/v1/object/product-images/products/7/old999.jpg",
+      "delete ticket removes exactly that product picture");
+mode = "delete-gone";
+r = await handle(post(JSON.stringify({ ticket: T })));
+check(r.status === 200, "deleting a picture that is already gone counts as done");
+
 mode = "ok"; env.SUPABASE_SERVICE_ROLE_KEY = undefined;
 r = await handle(post(JSON.stringify({ ticket: T })));
 check(r.status === 500, "no server key configured: 500, nothing called");
