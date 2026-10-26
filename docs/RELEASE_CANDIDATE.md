@@ -74,7 +74,7 @@ It was then compared object by object with production:
 | RLS flags and table grants (19 tables) | **identical** |
 | Legacy Desktop tables (`users`, `bookings`, `clients`, …) | now in `sql/20261026_00_legacy_tables_from_production.sql` (written from production's catalog). A database built only from the repository files is **identical** to production: 80/80 schema fingerprints (`sql/tests/rebuild_check.sh`). |
 | Edge Function `trimax-admin-media` | v1 matched repo `5db009c`; **v2 deployed 2026-10-26** = repo `handler.ts` (sha256 identical) |
-| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, `_06` (2026-10-26), `20261026_01` (2026-10-26) and `20261027_01` (2026-10-27), all with approval. `_07` is **not applied**. |
+| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, `_06` (2026-10-26), `20261026_01` (2026-10-26), `20261027_01` and `20261027_02` (2026-10-27), all with approval. `_07` is **not applied**. |
 
 ### Waiting for separate approval (in this order)
 
@@ -89,8 +89,12 @@ It was then compared object by object with production:
    discounts). Branches `feature/sales-profit-payroll` (Desktop) and `feature/customer-photo-discounts`
    (Android). See `SALES_PROFIT_PAYROLL.md`.
 
-Rollbacks: `_96` (Stage F, part A keeps pictures), `_95` (Stage G, part A keeps resolutions) and
-`20261027_93` (keeps every sale, payroll record, stock movement and photo).
+6. ~~`20261027_02_expenses.sql` (other expenses in net profit)~~ **Applied 2026-10-27** with approval; install the Desktop build the same day. Branch
+   `feature/other-expenses` (PR #10, stacked on #9). No Edge Function or APK change.
+
+Rollbacks: `_96` (Stage F, part A keeps pictures), `_95` (Stage G, part A keeps resolutions),
+`20261027_93` (keeps every sale, payroll record, stock movement and photo) and `20261027_92` (keeps every
+expense and its history).
 
 ## Tests run for this RC (cloud workspace)
 
@@ -155,6 +159,15 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 - [ ] In-House sale for a customer, Unpaid → Mark as paid. Void a sale: stock comes back, history shows VOID.
 - [ ] Sales & Profit: Today / Yesterday / Last 7 days / month / year / custom; numbers match the sales above; export CSV, Excel, PDF.
 - [ ] Payroll: add, edit, mark paid, void with reason; the period's payroll appears in profit.
+
+**Other expenses (after `20261027_02`, approval first)**
+
+- [ ] Before the update: Expenses says it needs database update 20261027_02; Sales & Profit says other expenses are "Not counted yet".
+- [ ] Add an Unpaid Rent and a Paid Electricity (GCash) dated this month; the cards total them; double-click Save adds one.
+- [ ] Edit the rent amount, then mark it Paid; History... lists both changes with your name.
+- [ ] Void a Fuel expense with a reason: it no longer counts; Edit is disabled; History... shows the void.
+- [ ] Sales & Profit (This month): Other expenses = paid + unpaid; Net profit = gross profit − payroll − other expenses; the trend line drops on the expense dates.
+- [ ] Export CSV, Excel and PDF for This month and for Last 90 days: Other expenses rows and the trend column are there; the 90-day PDF finishes (several pages, every column).
 - [ ] Phone: add a customer with a camera photo, and one with a gallery photo; the photo opens on the Desktop customer.
 - [ ] Phone: booking with a discount within the limit is saved (Desktop shows original / discount / final); one over the limit is refused with the maximum; a product without puhunan allows no discount.
 - [ ] Phone: an older customer shows the placeholder; Add photo works.

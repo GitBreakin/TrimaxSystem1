@@ -134,4 +134,28 @@ psql_owner -c "update products set stock = stock + 1 where product_id = (select 
 test "$(psql_owner -tAc "select count(*) from inventory_movements")" = "$before" && echo "PASS after rollback stock changes are no longer recorded (trigger removed)"
 psql_owner -f 20261027_01_sales_inventory_payroll.sql 2>/dev/null || psql_owner -f 20261027_01_sales_inventory_payroll.sql
 test "$(psql_owner -tAc "select pronargs from pg_proc where proname = 'trimax_agent_create_booking'")" = "11" && echo "PASS sales/inventory/payroll re-applies after rollback"
+echo "== Other expenses in net profit (twice: re-runnable)"
+# check "<sql returning t>" "<label>": stops the run with FAIL when the answer is not t.
+check() { if [ "$(psql_owner -tAc "$1")" = "t" ]; then echo "PASS $2"; else echo "FAIL $2"; exit 1; fi; }
+psql_owner -f 20261027_02_expenses.sql
+psql_owner -f 20261027_02_expenses.sql
+psql_su -d "$DB" -f tests/46_expenses_tests.sql > "/tmp/$DB.46.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL EXPENSES/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.46.log"
+grep -q '^ALL EXPENSES SQL TESTS PASSED' "/tmp/$DB.46.log" || { echo "FAIL expense tests (see above)"; exit 1; }
+check "select count(*) = 2 from pg_proc where proname in ('save_expense','void_expense')" "save_expense and void_expense exist"
+echo "== Other expenses rollback, then re-apply"
+exp_rows="$(psql_owner -tAc "select count(*) from expenses")"
+hist_rows="$(psql_owner -tAc "select count(*) from expense_history")"
+psql_owner -f 20261027_92_rollback_expenses.sql
+check "select count(*) = 0 from pg_proc where proname in ('save_expense','void_expense')" "rollback removed save_expense and void_expense"
+check "select pg_get_function_result('trimax_private.profit_summary(timestamptz,timestamptz)'::regprocedure) not like '%other_expenses%' and pg_get_function_result('trimax_private.profit_trend(timestamptz,timestamptz,text)'::regprocedure) not like '%other_expenses%'" "rollback put back the reports without expenses"
+check "select bool_and(net_profit = gross_profit - payroll_paid - payroll_unpaid) from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after rollback net profit = gross profit - payroll again"
+check "select (select count(*) from expenses) = $exp_rows and (select count(*) from expense_history) = $hist_rows" "rollback kept every expense ($exp_rows) and history line ($hist_rows)"
+if psql_owner -c "delete from expenses" >/dev/null 2>&1; then echo "FAIL expenses could be deleted after rollback"; exit 1; fi
+echo "PASS after rollback expenses still cannot be deleted"
+psql_owner -f 20261027_02_expenses.sql
+check "select count(*) = 2 from pg_proc where proname in ('save_expense','void_expense')" "expenses re-apply after rollback"
+check "select count(*) = $exp_rows from expenses" "re-apply continues from the same expenses"
+check "select other_expenses > 0 and net_profit = gross_profit - payroll_paid - payroll_unpaid - other_expenses from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after re-apply the report counts the expenses again"
+rm -f "/tmp/$DB.46.log"
 echo "ALL DATABASE TESTS PASSED"

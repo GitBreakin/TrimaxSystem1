@@ -13,6 +13,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
 | `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
+| `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
 
 ## Files (run in this order)
 
@@ -28,6 +29,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `sql/20261026_01_employee_mobile_sign_in.sql` | Agent/Driver Supabase sign-ins without the Dashboard. `trimax_private.provisioning_tickets`; `trimax_private.issue_provisioning_ticket(admin, username)` (owner only: Active Admin; queues with the existing `request_mobile_access`); `public.trimax_service_claim_provisioning_ticket(ticket)` and `public.trimax_service_use_setup_code(email, code)` (service role only); private helper `claim_provisioning_request`. Replaces `trimax_service_finish_provisioning` with the same logic but a valid audit actor (the old one audited as `provisioning`, which `audit_log_actor_username_fkey` refuses). Used with `supabase/functions/trimax-accounts` | Additive: 1 private table, 4 new functions, 1 fixed function, no data |
 | `sql/20261027_01_sales_inventory_payroll.sql` | Products: puhunan, patong (amount or percent), minimum patong, price kept consistent by a trigger. `public.inventory_movements` (append-only stock history, written by a trigger on `products.stock` with the reason of each change). Bookings: completion time, cost snapshot per line (`booking_items.unit_cost`), agent discount columns and checks (minimum price = puhunan + minimum patong). `public.sales` / `sale_items` (Walk-In / In-House, receipt numbers, void with stock return). `public.payroll_records`. Owner-only Desktop functions (`save_product`, `restock_product`, `adjust_stock`, `create_sale`, `void_sale`, `set_sale_paid`, `save_payroll`, `void_payroll`, `profit_summary`, `profit_trend`). Phone: private `customer-photos` bucket (own-folder policies), `trimax_agent_save_customer`, `_list_customers`, `_discount_quote`, `_set_discount`, and `trimax_agent_create_booking` with an optional discount (a new customer must be saved with a photo first). `issue_media_ticket` accepts customer photos. RLS on every new table, no API grants | Additive: 4 tables, 1 sequence, 1 bucket, columns on `products`, `bookings`, `booking_items`, `clients`; replaces 4 functions; no data rewritten |
 | `sql/20261027_93_rollback_sales_inventory_payroll.sql` | Undoes `20261027_01`'s behaviour: puts back the previous `trimax_agent_create_booking`, `booking_json`, booking-total trigger, `issue_media_ticket` and media-ticket checks; drops the new functions, triggers and policies; keeps every new table, column and row | — |
+| `sql/20261027_02_expenses.sql` | `public.expenses` (date, category, description, amount, Paid/Unpaid with date and method, notes, void with reason, `client_request_id`) and append-only `public.expense_history` (written by a trigger; expenses cannot be deleted and a voided one cannot change). Owner-only `trimax_private.save_expense` / `void_expense` (Active Admin, audited). `profit_summary` / `profit_trend` dropped and created again with the expense columns **added at the end**; net profit = gross profit − payroll − other expenses | Adds 2 tables, 5 functions, 3 triggers; replaces the 2 report functions; changes no row |
+| `sql/20261027_92_rollback_expenses.sql` | Undoes `20261027_02`'s behaviour: puts back the 2 report functions exactly as `20261027_01` (same body hash) and drops `save_expense` / `void_expense`; keeps both tables, their rows and their protection | — |
 | `sql/20261026_94_rollback_employee_mobile_sign_in.sql` | Undoes `20261026_01`: drops the tickets and the 4 functions and puts back the previous finish function; keeps every sign-in and link | — |
 | `sql/20261025_96_rollback_product_images.sql` | Undoes `_06` (part A keeps pictures and paths; part B, commented, drops the columns) | — |
 | `sql/20261025_97_rollback_media_tickets.sql` | Undoes `_05` (tickets are short-lived; audit rows stay) | — |
@@ -141,6 +144,20 @@ rollback: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
 Tests: `sql/tests/45_sales_inventory_payroll_tests.sql` in `run_tests.sh` (full suite: 472 checks, ALL
 DATABASE TESTS PASSED on 2026-10-26, including rollback and re-apply) and the Edge Function tests (22
 checks, with a customer-photo case).
+
+### `20261027_02` (other expenses in net profit): applied 2026-10-27
+
+Applied with the owner's approval (about 03:36 Manila, one transaction). Before: production equalled the
+repository rebuild through `20261027_01` (100/100 fingerprints); a dry run on a copy of production's rows
+(passwords and contact details masked) changed no row and gave the same report results. After: 108/108
+fingerprints equal the rebuild through `20261027_02`; the row checksums of all 24 existing tables and the
+`20261027_01` report columns (4 periods + 2 trends) are unchanged. Security advisors: no new warning (the
+two new tables show the same "RLS on, no policy" INFO as every TRIMAX table). No full data dump was taken
+(the update changes no row); undo with `20261027_92`. Details: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
+
+Tests: `sql/tests/46_expenses_tests.sql` in `run_tests.sh` (50 checks + rollback and re-apply; ALL DATABASE
+TESTS PASSED 2026-10-27). Also checked: after `20261027_02` + `20261027_92` the two report functions have
+the same body hash and grants as after `20261027_01` alone.
 
 ## Rebuilding a database from this repository (checked 2026-10-26)
 

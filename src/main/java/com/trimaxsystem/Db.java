@@ -8,14 +8,17 @@ import java.util.UUID;
 
 /**
  * Small database helpers shared by the sales, stock, payroll and profit screens.
- * The business rules live in the database functions of sql/20261027_01_sales_inventory_payroll.sql;
+ * The business rules live in the database functions of sql/20261027_01_sales_inventory_payroll.sql
+ * and sql/20261027_02_expenses.sql;
  * these helpers only check that they are there, label stock changes and turn errors into plain text.
  */
 final class Db {
 
     static final String UPDATE_27 = "database update 20261027_01_sales_inventory_payroll";
+    static final String UPDATE_27_EXPENSES = "database update 20261027_02_expenses";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
+    private static volatile boolean expensesReady;
 
     private Db() {
     }
@@ -44,7 +47,34 @@ final class Db {
     }
 
     static String notReadyMessage(String what) {
-        return what + " needs the " + UPDATE_27 + " on the server. Ask the person who manages the database to apply it.";
+        return notReadyMessage(what, UPDATE_27);
+    }
+
+    static String notReadyMessage(String what, String update) {
+        return what + " needs the " + update + " on the server. Ask the person who manages the database to apply it.";
+    }
+
+    /** True when the server has the expense table and functions (20261027_02), on top of 20261027_01. */
+    static boolean expensesReady() {
+        if (expensesReady) return true;
+        if (!salesReady()) return false;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.save_expense(text,bigint,uuid,date,text,text,numeric,text,date,text,text)') is not null "
+                             + "and to_regprocedure('trimax_private.void_expense(text,bigint,text)') is not null "
+                             + "and to_regclass('public.expenses') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            expensesReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return expensesReady;
+    }
+
+    /** The update a screen still needs ("" when the server has both). */
+    static String missingExpensesUpdate() {
+        if (!salesReady()) return UPDATE_27;
+        return expensesReady() ? "" : UPDATE_27_EXPENSES;
     }
 
     /** A new id for one save, so a double click or a retry is saved only once. */
@@ -85,10 +115,19 @@ final class Db {
         return new Failure(message(e, what));
     }
 
+    /** Like failure(e, what), but a missing table or function names the given database update. */
+    static Failure failure(SQLException e, String what, String update) {
+        return new Failure(message(e, what, update));
+    }
+
     static String message(SQLException e, String what) {
+        return message(e, what, UPDATE_27);
+    }
+
+    static String message(SQLException e, String what, String update) {
         String state = e.getSQLState();
         if ("42883".equals(state) || "3F000".equals(state) || "42703".equals(state) || "42P01".equals(state)) {
-            return notReadyMessage(what);
+            return notReadyMessage(what, update);
         }
         String msg = e.getMessage() == null ? "" : e.getMessage();
         int nl = msg.indexOf('\n');

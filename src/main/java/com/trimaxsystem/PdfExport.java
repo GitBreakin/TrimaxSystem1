@@ -40,27 +40,23 @@ public final class PdfExport {
 
     public static void write(Path file, ReportTable t) throws IOException {
         PDRectangle size = new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth());   // landscape
-        int cols = t.header.size();
         float usable = size.getWidth() - 2 * MARGIN;
-        float[] weight = new float[cols];
-        float total = 0;
-        for (int c = 0; c < cols; c++) {
-            int len = t.header.get(c).length();
-            for (List<String> r : t.rows) {
-                if (c < r.size()) len = Math.max(len, Math.min(28, r.get(c).length()));
-            }
-            weight[c] = Math.max(8, len) + 2;
-            total += weight[c];
-        }
-        float[] width = new float[cols];
-        for (int c = 0; c < cols; c++) width[c] = usable * weight[c] / total;
+        float[] width = widths(t.header, t.rows, usable);
+        // The footer (totals, or a trend table) can have more columns than the header: its own widths.
+        List<String> footerHead = t.footer.isEmpty() ? List.of() : t.footer.get(0);
+        int footerCols = 0;
+        for (List<String> f : t.footer) footerCols = Math.max(footerCols, f.size());
+        java.util.List<String> fh = new java.util.ArrayList<>(footerHead);
+        while (fh.size() < footerCols) fh.add("");
+        float[] footerWidth = t.footer.isEmpty() ? width
+                : footerCols <= t.header.size() ? width : widths(fh, t.footer, usable);
 
         try (PDDocument doc = new PDDocument()) {
             int pageNo = 0;
             int rowIdx = 0;
+            int footIdx = 0;
             boolean firstPage = true;
-            boolean footerDone = t.footer.isEmpty();
-            while (firstPage || rowIdx < t.rows.size() || !footerDone) {
+            while (firstPage || rowIdx < t.rows.size() || footIdx < t.footer.size()) {
                 PDPage page = new PDPage(size);
                 doc.addPage(page);
                 pageNo++;
@@ -73,18 +69,31 @@ public final class PdfExport {
                         }
                         y -= 8;
                     }
-                    y = row(cs, BOLD, t.header, width, y);
                     float bottom = MARGIN + 20;
-                    while (rowIdx < t.rows.size() && y - ROW_H > bottom) {
-                        y = row(cs, REG, t.rows.get(rowIdx++), width, y);
+                    if (firstPage || rowIdx < t.rows.size()) {
+                        y = row(cs, BOLD, t.header, width, y);
+                        while (rowIdx < t.rows.size() && y - ROW_H > bottom) {
+                            y = row(cs, REG, t.rows.get(rowIdx++), width, y);
+                        }
                     }
-                    if (rowIdx >= t.rows.size() && !footerDone) {
-                        y -= 8;
-                        int need = t.footer.size();
-                        if (y - need * ROW_H > bottom) {
-                            for (List<String> f : t.footer) y = row(cs, BOLD, f, width, y);
-                            footerDone = true;
-                        }   // otherwise the totals go on the next page
+                    if (rowIdx >= t.rows.size() && footIdx < t.footer.size()) {
+                        if (footIdx > 0) {
+                            // a footer that continues on a new page repeats its first line (its column names)
+                            y = row(cs, BOLD, t.footer.get(0), footerWidth, y);
+                        } else {
+                            y -= 8;
+                            // keep short footers (totals) together: start them on the next page if they do not fit
+                            int need = Math.min(t.footer.size(), 6);
+                            if (y - need * ROW_H <= bottom && y < size.getHeight() - MARGIN - 8) {
+                                text(cs, REG, 8, size.getWidth() / 2 - 20, MARGIN - 10, "Page " + pageNo);
+                                firstPage = false;
+                                continue;
+                            }
+                        }
+                        // at least one footer line per page, so a long footer always finishes
+                        do {
+                            y = row(cs, BOLD, t.footer.get(footIdx++), footerWidth, y);
+                        } while (footIdx < t.footer.size() && y - ROW_H > bottom);
                     }
                     text(cs, REG, 8, size.getWidth() / 2 - 20, MARGIN - 10, "Page " + pageNo);
                 }
@@ -92,6 +101,24 @@ public final class PdfExport {
             }
             doc.save(file.toFile());
         }
+    }
+
+    /** Column widths by the longest text in each column (capped), filling the usable width. */
+    static float[] widths(List<String> header, List<List<String>> rows, float usable) {
+        int cols = header.size();
+        float[] weight = new float[cols];
+        float total = 0;
+        for (int c = 0; c < cols; c++) {
+            int len = header.get(c).length();
+            for (List<String> r : rows) {
+                if (c < r.size()) len = Math.max(len, Math.min(28, r.get(c).length()));
+            }
+            weight[c] = Math.max(8, len) + 2;
+            total += weight[c];
+        }
+        float[] width = new float[cols];
+        for (int c = 0; c < cols; c++) width[c] = usable * weight[c] / total;
+        return width;
     }
 
     private static float row(PDPageContentStream cs, PDFont font, List<String> cells, float[] width, float y)
