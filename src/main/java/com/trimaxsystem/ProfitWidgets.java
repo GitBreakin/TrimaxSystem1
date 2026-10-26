@@ -97,7 +97,7 @@ final class ProfitWidgets {
                         }
                         status.setForeground(Theme.MUTED);
                         status.setText("Net sales = completed bookings + paid Walk-In / In-House sales, after discounts. "
-                                + "Net profit = gross profit − payroll.");
+                                + "Net profit = gross profit − payroll − other expenses.");
                     } catch (Exception ex) {
                         Throwable c = ex.getCause() != null ? ex.getCause() : ex;
                         for (JLabel[] l : cells.values()) {
@@ -151,7 +151,7 @@ final class ProfitWidgets {
             boolean allZero = points.stream().allMatch(p -> p.revenue.signum() == 0 && p.netProfit.signum() == 0);
             if (message != null || points.isEmpty() || allZero) {
                 g.setColor(Theme.MUTED);
-                String m = message != null ? message : "No sales, costs or payroll in this period";
+                String m = message != null ? message : "No sales, costs, payroll or expenses in this period";
                 g.drawString(m, (w - fm.stringWidth(m)) / 2, h / 2);
                 g.dispose();
                 return;
@@ -217,7 +217,8 @@ final class ProfitWidgets {
                 g.drawString(s, x, h - 10);
             }
             // legend
-            int lx = w - right - 250;
+            String lineLabel = "Net profit (after payroll and expenses)";
+            int lx = Math.max(left, w - right - 124 - g.getFontMetrics().stringWidth(lineLabel));
             g.setColor(new Color(0x93C5FD));
             g.fillRect(lx, 8, 12, 10);
             g.setColor(Theme.TEXT);
@@ -226,7 +227,7 @@ final class ProfitWidgets {
             g.fillOval(lx + 100, 9, 8, 8);
             g.drawLine(lx + 94, 13, lx + 114, 13);
             g.setColor(Theme.TEXT);
-            g.drawString("Net profit (after payroll)", lx + 120, 17);
+            g.drawString(lineLabel, lx + 120, 17);
             g.dispose();
         }
 

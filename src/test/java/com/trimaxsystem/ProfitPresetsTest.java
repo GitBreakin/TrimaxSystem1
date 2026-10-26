@@ -27,6 +27,19 @@ class ProfitPresetsTest {
     }
 
     @Test
+    void otherExpensesAddUpAndAPeriodWithOnlyExpensesIsNotEmpty() {
+        ProfitService.Summary s = new ProfitService.Summary();
+        assertEquals(0, java.math.BigDecimal.ZERO.compareTo(s.otherExpenses()), "a server without 20261027_02 reads as 0");
+        assertFalse(s.expensesTracked);
+        assertTrue(s.empty());
+        s.otherExpensesPaid = new java.math.BigDecimal("1500.50");
+        s.otherExpensesUnpaid = new java.math.BigDecimal("4500.00");
+        s.otherExpensesCount = 2;
+        assertEquals(0, new java.math.BigDecimal("6000.50").compareTo(s.otherExpenses()));
+        assertFalse(s.empty(), "a period with only expenses still shows the report");
+    }
+
+    @Test
     void stockMovementLabels() {
         assertEquals("Restock", InventoryService.kindLabel("RESTOCK"));
         assertEquals("Sale voided", InventoryService.kindLabel("SALE_VOIDED"));

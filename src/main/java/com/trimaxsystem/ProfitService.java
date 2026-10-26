@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -15,11 +16,15 @@ import java.util.Map;
 
 /**
  * Sales and profit from the database (trimax_private.profit_summary / profit_trend, sql/20261027_01
- * part 9), so the Dashboard, Sales & Profit and the exports all use the same rules:
- *   Net sales    = sales - discounts   (completed bookings by completion date + paid Walk-In / In-House sales)
- *   Gross profit = net sales - cost of goods sold (the puhunan recorded on each sold line)
- *   Net profit   = gross profit - payroll (pay periods ending in the range, paid and unpaid)
+ * part 9 and sql/20261027_02), so the Dashboard, Sales & Profit and the exports all use the same rules:
+ *   Net sales      = sales - discounts   (completed bookings by completion date + paid Walk-In / In-House sales)
+ *   Gross profit   = net sales - cost of goods sold (the puhunan recorded on each sold line)
+ *   Net profit     = gross profit - payroll - other expenses
+ *   Payroll        = pay periods ending in the range, paid and unpaid
+ *   Other expenses = expenses dated in the range, paid and unpaid, not voided (20261027_02)
  * Days are Asia/Manila days; a range [from, to] includes both dates.
+ * On a server without 20261027_02 the expense columns are missing: they read as 0 and
+ * {@link Summary#expensesTracked} is false, and net profit is the server's (gross profit - payroll).
  */
 final class ProfitService {
 
@@ -28,11 +33,18 @@ final class ProfitService {
 
     static final class Summary {
         LocalDate from, to;
-        int bookingsCount, salesCount, unpaidCount, payrollCount, restockCount, bookingsNoCost, salesNoCost;
+        int bookingsCount, salesCount, unpaidCount, payrollCount, restockCount, bookingsNoCost, salesNoCost, otherExpensesCount;
         BigDecimal bookingsGross, bookingsDiscount, bookingsNet, bookingsCogs;
         BigDecimal salesGross, salesDiscount, salesNet, salesCogs;
         BigDecimal unpaidTotal, revenueGross, discounts, revenueNet, cogs, grossProfit;
         BigDecimal payrollPaid, payrollUnpaid, netProfit, restockCost;
+        BigDecimal otherExpensesPaid = BigDecimal.ZERO, otherExpensesUnpaid = BigDecimal.ZERO;
+        /** False when the server does not have 20261027_02 yet (no other expenses in net profit). */
+        boolean expensesTracked;
+
+        BigDecimal otherExpenses() {
+            return otherExpensesPaid.add(otherExpensesUnpaid);
+        }
 
         int linesWithoutCost() {
             return bookingsNoCost + salesNoCost;
@@ -49,7 +61,8 @@ final class ProfitService {
         }
 
         boolean empty() {
-            return bookingsCount == 0 && salesCount == 0 && unpaidCount == 0 && payrollCount == 0 && restockCount == 0;
+            return bookingsCount == 0 && salesCount == 0 && unpaidCount == 0 && payrollCount == 0 && restockCount == 0
+                    && otherExpensesCount == 0;
         }
     }
 
@@ -98,6 +111,12 @@ final class ProfitService {
                 s.netProfit = rs.getBigDecimal("net_profit");
                 s.restockCost = rs.getBigDecimal("restock_cost");
                 s.restockCount = rs.getInt("restock_count");
+                s.expensesTracked = hasColumn(rs.getMetaData(), "other_expenses_paid");
+                if (s.expensesTracked) {
+                    s.otherExpensesPaid = rs.getBigDecimal("other_expenses_paid");
+                    s.otherExpensesUnpaid = rs.getBigDecimal("other_expenses_unpaid");
+                    s.otherExpensesCount = rs.getInt("other_expenses_count");
+                }
                 return s;
             }
         }
@@ -130,6 +149,15 @@ final class ProfitService {
     static final class Point {
         LocalDate bucket;
         BigDecimal revenue, cogs, grossProfit, payroll, netProfit;
+        BigDecimal otherExpenses = BigDecimal.ZERO;
+    }
+
+    /** True when the result has that column (case-insensitive; PostgreSQL returns lower case). */
+    static boolean hasColumn(ResultSetMetaData md, String name) throws SQLException {
+        for (int i = 1; i <= md.getColumnCount(); i++) {
+            if (name.equalsIgnoreCase(md.getColumnLabel(i))) return true;
+        }
+        return false;
     }
 
     /** Daily points for ranges up to 92 days, monthly ones above that. */
@@ -146,6 +174,7 @@ final class ProfitService {
             ps.setString(2, to.toString());
             ps.setString(3, monthly(from, to) ? "month" : "day");
             try (ResultSet rs = ps.executeQuery()) {
+                boolean withExpenses = hasColumn(rs.getMetaData(), "other_expenses");
                 while (rs.next()) {
                     Point p = new Point();
                     p.bucket = rs.getDate("bucket_start").toLocalDate();
@@ -154,6 +183,7 @@ final class ProfitService {
                     p.grossProfit = rs.getBigDecimal("gross_profit");
                     p.payroll = rs.getBigDecimal("payroll");
                     p.netProfit = rs.getBigDecimal("net_profit");
+                    if (withExpenses) p.otherExpenses = rs.getBigDecimal("other_expenses");
                     out.add(p);
                 }
             }

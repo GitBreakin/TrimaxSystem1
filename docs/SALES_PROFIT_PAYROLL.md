@@ -19,6 +19,7 @@ booking, line, customer or agent value changed. Next: install the new APK on eve
 | Walk-In / In-House sales, receipts, void | yes | no | no |
 | Sales & Profit dashboard | yes | no | no |
 | Payroll | yes | no | no |
+| Other expenses (`20261027_02`) | yes | no | no |
 | Discount on a booking | sees original / discount / final and who gave it | gives it (Pending bookings), up to the allowed maximum | no |
 | Customer photo | views it on the customer | takes it (required for a new customer) | no |
 
@@ -101,12 +102,15 @@ Periods: **Today, Yesterday, Last 7 days, This month, This year, Custom range**.
 | Cost of goods sold | Quantity × unit cost **at the time of the sale/booking** (lines without a cost are counted and shown as a warning, not guessed) |
 | Gross profit | Net sales − cost of goods sold |
 | Payroll | Payroll records whose **pay period ends** inside the range; Paid and Unpaid shown separately; both are subtracted; void records never count |
-| Net profit | Gross profit − payroll |
+| Other expenses (`20261027_02`) | Expenses **dated** inside the range (Electricity, Water, Rent, Fuel, Repairs, Supplies, Internet & phone, Taxes & permits, Other); Paid and Unpaid shown separately; both are subtracted; voided expenses never count |
+| Net profit | Gross profit − payroll − other expenses |
 | Shown, not subtracted | Unpaid sales (count and total), restock spending |
 
-Pending, confirmed, in-progress, cancelled and failed bookings are not revenue. "Other expenses" are not
-tracked yet (there is no expenses table). Charts show the trend by day, or by month for ranges over 92
-days. Every period can be exported to CSV, Excel or PDF. Empty periods show an empty state.
+Pending, confirmed, in-progress, cancelled and failed bookings are not revenue. Until `20261027_02` is on
+the server, the Other expenses card says "Not counted yet" and net profit is gross profit − payroll.
+Charts show the trend by day, or by month for ranges over 92 days. Every period can be exported to CSV,
+Excel or PDF (the export lists Other expenses paid / unpaid and has an Other expenses column in the
+trend). Empty periods show an empty state.
 
 ## Payroll (Payroll)
 
@@ -116,6 +120,34 @@ days. Every period can be exported to CSV, Excel or PDF. Empty periods show an e
   needs a reason and is kept in the history.
 - History filters: employee, status, and the range in which the period ends. The summary shows totals
   for the filtered records.
+
+## Other expenses (Expenses, database update `20261027_02`)
+
+Owner's request of 2026-10-27: business costs that are not payroll and not stock lower net profit.
+
+- Date, category, what it was for, amount, **Unpaid / Paid** (with the date paid and Cash, GCash, Bank
+  transfer, Check or Other), notes. The database records who entered it and when.
+- **Net profit = gross profit − payroll − other expenses.** An expense counts by its **date** (Asia/Manila
+  days), paid and unpaid alike, like payroll. Restocks are still not expenses: stock cost counts when the
+  goods are sold (cost of goods sold).
+- A wrong expense is **voided with a reason**, never deleted; a voided one cannot be changed. Every
+  create, edit and void is kept in `public.expense_history` (the row before and after; append-only) and in
+  the audit log. History... on the Expenses page shows it in words.
+- Filters: category, status (unpaid and paid / unpaid / paid / voided / all), date range, This month /
+  Last month, search in the description and notes. The cards total the filtered, non-voided expenses.
+- A double click on Save saves once (`client_request_id`).
+- Phones cannot see expenses (RLS on, no grants; the functions are for the database owner only).
+- Without `20261027_02` on the server the Expenses page says it needs that database update and New
+  expense is disabled. An older Desktop on a server that has it keeps working; its Sales & Profit shows the
+  lower net profit but no expense line, so install the new Desktop the same day.
+
+Rollout (after approval): compare production with the repository rebuild (fingerprints) → dry run on a copy
+of production's rows → back up → apply `sql/20261027_02_expenses.sql` (one transaction, re-runnable) →
+install the Desktop build. No Edge Function and no APK change.
+
+Rollback: `sql/20261027_92_rollback_expenses.sql` puts back `profit_summary` / `profit_trend` exactly as
+`20261027_01` made them and removes `save_expense` / `void_expense`. It keeps every expense and history
+row and their protection; re-applying `20261027_02` continues from the same data.
 
 ## Customer photos (Agents)
 
@@ -147,8 +179,10 @@ new table, column and row (sales, payroll, stock movements, photos).
 
 - Database: `sql/tests/45_sales_inventory_payroll_tests.sql` in `sql/tests/run_tests.sh` (disposable
   local PostgreSQL only); the full suite passed with 472 checks, including rollback and re-apply.
-- Desktop: `mvn test` (MoneyTest, SaleCartTest, ReceiptLayoutTest, ProfitPresetsTest, and the earlier
-  tests).
+- Other expenses: `sql/tests/46_expenses_tests.sql` in `run_tests.sh` (50 checks, then rollback and
+  re-apply; ALL DATABASE TESTS PASSED on 2026-10-27 on PostgreSQL 16.15).
+- Desktop: `mvn test` (MoneyTest, SaleCartTest, ReceiptLayoutTest, ProfitPresetsTest, ExpenseServiceTest,
+  PdfExportTest, and the earlier tests).
 - Android: `./gradlew testDebugUnitTest` (DiscountCalcTest, DiscountQuoteTest, ServerCustomerTest,
   CustomerPhotosTest, CustomerPhotoDownloadTest, and additions to BookingRecordTest,
   CreateBookingRequestTest, CustomerDirectoryTest).

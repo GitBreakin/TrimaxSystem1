@@ -15,7 +15,8 @@ import javax.swing.table.DefaultTableModel;
  * Sales & Profit: actual sales and profit for Today, Yesterday, Last 7 days, This month, This year or
  * any range, from the database rules in {@link ProfitService}. Revenue, gross profit and net profit are
  * shown apart and named as such; unpaid sales, restock purchases and lines without a recorded cost are
- * listed separately so nothing is counted twice or silently left out.
+ * listed separately so nothing is counted twice or silently left out. Net profit = gross profit - payroll
+ * - other expenses (the Expenses page; needs database update 20261027_02).
  */
 public class ProfitPanel extends JPanel {
 
@@ -126,7 +127,7 @@ public class ProfitPanel extends JPanel {
         report.add(Box.createVerticalStrut(10));
 
         JPanel chartCard = UiKit.card(new BorderLayout(0, 6), 12, 14);
-        chartCard.add(UiKit.cardHeading("Trend", "Net sales (bars) and net profit after payroll (line)"), BorderLayout.NORTH);
+        chartCard.add(UiKit.cardHeading("Trend", "Net sales (bars) and net profit after payroll and other expenses (line)"), BorderLayout.NORTH);
         chartCard.add(chart, BorderLayout.CENTER);
         chartCard.setAlignmentX(Component.LEFT_ALIGNMENT);
         report.add(chartCard);
@@ -146,8 +147,9 @@ public class ProfitPanel extends JPanel {
         JTextArea defs = UiKit.wrapText("Net sales = sales − discounts: Completed bookings (dated when completed) "
                 + "and Paid Walk-In / In-House sales (dated when sold). Pending, cancelled, unpaid and voided ones are not counted. "
                 + "Cost of goods sold = the puhunan recorded on each sold line at the time of the sale. "
-                + "Gross profit = net sales − cost of goods sold. Net profit = gross profit − payroll "
-                + "(pay periods ending in the range, paid and unpaid; voided records never). Restocks are stock purchases, not sales "
+                + "Gross profit = net sales − cost of goods sold. Net profit = gross profit − payroll − other expenses. "
+                + "Payroll: pay periods ending in the range, paid and unpaid. Other expenses (Expenses page): dated in the range, "
+                + "paid and unpaid. Voided records never count. Restocks are stock purchases, not sales "
                 + "or expenses here: their cost counts when the goods are sold. Days are Asia/Manila days.", Theme.SMALL, Theme.MUTED);
         tableCard.add(defs, BorderLayout.SOUTH);
         tableCard.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -263,12 +265,21 @@ public class ProfitPanel extends JPanel {
         mGpSub.setText("net sales − cost of goods" + (s.grossMargin() == null ? "" : "  ·  " + ProfitWidgets.pct(s.grossMargin())));
         mPay.setText(s.payroll().signum() == 0 ? Money.peso(BigDecimal.ZERO) : "− " + Money.peso(s.payroll()));
         mPaySub.setText("paid " + Money.peso(s.payrollPaid) + "  ·  unpaid " + Money.peso(s.payrollUnpaid));
-        mOther.setText("Not tracked");
-        mOther.setForeground(Theme.MUTED);
-        mOtherSub.setText("no other expenses are recorded in TRIMAX");
+        if (s.expensesTracked) {
+            mOther.setText(s.otherExpenses().signum() == 0 ? Money.peso(BigDecimal.ZERO) : "− " + Money.peso(s.otherExpenses()));
+            mOther.setForeground(Theme.TEXT);
+            mOtherSub.setText("paid " + Money.peso(s.otherExpensesPaid) + "  ·  unpaid " + Money.peso(s.otherExpensesUnpaid));
+            mOtherSub.setForeground(Theme.MUTED);
+            mNpSub.setText("gross profit − payroll − other expenses");
+        } else {
+            mOther.setText("Not counted yet");
+            mOther.setForeground(Theme.MUTED);
+            mOtherSub.setText("needs " + Db.UPDATE_27_EXPENSES);
+            mOtherSub.setForeground(Theme.WARN);
+            mNpSub.setText("gross profit − payroll (other expenses not counted)");
+        }
         mNp.setText(Money.peso(s.netProfit));
         mNp.setForeground(s.netProfit.signum() < 0 ? Theme.DANGER : Theme.OK);
-        mNpSub.setText("gross profit − payroll");
 
         notes.setText("Not counted as sales: " + s.unpaidCount + " unpaid sale(s) worth " + Money.peso(s.unpaidTotal)
                 + " (they count when paid).   Stock purchased (restocks): " + s.restockCount + " restock(s), "
@@ -291,8 +302,8 @@ public class ProfitPanel extends JPanel {
                 Money.plain(s.discounts), Money.plain(s.revenueNet), Money.plain(s.cogs), Money.plain(s.grossProfit)});
 
         if (s.empty()) {
-            state.showEmpty("No sales, payroll or restocks from " + s.from + " to " + s.to,
-                    "Completed bookings, paid Walk-In / In-House sales and payroll records appear here.");
+            state.showEmpty("No sales, payroll, expenses or restocks from " + s.from + " to " + s.to,
+                    "Completed bookings, paid Walk-In / In-House sales, payroll and other expenses appear here.");
             cards.show(center, "state");
             export.setEnabled(true);
             return;
@@ -309,7 +320,13 @@ public class ProfitPanel extends JPanel {
         t.meta.add("Period: " + s.from + " to " + s.to + " (Asia/Manila, both included)");
         t.meta.add("Net sales: completed bookings (by completion date) + paid Walk-In / In-House sales, after discounts");
         t.meta.add("Gross profit: net sales - cost of goods sold (puhunan recorded at the time of sale)");
-        t.meta.add("Net profit: gross profit - payroll (pay periods ending in the period; paid and unpaid)");
+        if (s.expensesTracked) {
+            t.meta.add("Net profit: gross profit - payroll - other expenses");
+            t.meta.add("Payroll: pay periods ending in the period; Other expenses: dated in the period (both paid and unpaid, voided never)");
+        } else {
+            t.meta.add("Net profit: gross profit - payroll (pay periods ending in the period; paid and unpaid)");
+            t.meta.add("Note: other expenses are not counted (the server needs " + Db.UPDATE_27_EXPENSES + ")");
+        }
         if (s.linesWithoutCost() > 0) {
             t.meta.add("Note: " + s.linesWithoutCost() + " sold lines have no recorded puhunan; their cost is not included");
         }
@@ -322,14 +339,23 @@ public class ProfitPanel extends JPanel {
         t.rows.add(List.of("Gross profit", plain(s.grossProfit)));
         t.rows.add(List.of("Payroll paid", plain(s.payrollPaid)));
         t.rows.add(List.of("Payroll unpaid", plain(s.payrollUnpaid)));
+        if (s.expensesTracked) {
+            t.rows.add(List.of("Other expenses paid", plain(s.otherExpensesPaid)));
+            t.rows.add(List.of("Other expenses unpaid", plain(s.otherExpensesUnpaid)));
+        }
         t.rows.add(List.of("Net profit", plain(s.netProfit)));
         t.rows.add(List.of("Unpaid sales (not counted)", plain(s.unpaidTotal)));
         t.rows.add(List.of("Restock purchases (not revenue)", plain(s.restockCost)));
         if (currentTrend != null) {
-            t.footer.add(List.of("Date", "Net sales", "Cost of goods", "Gross profit", "Payroll", "Net profit"));
+            boolean exp = s.expensesTracked;
+            t.footer.add(exp ? List.of("Date", "Net sales", "Cost of goods", "Gross profit", "Payroll", "Other expenses", "Net profit")
+                    : List.of("Date", "Net sales", "Cost of goods", "Gross profit", "Payroll", "Net profit"));
             for (ProfitService.Point p : currentTrend) {
-                t.footer.add(List.of(p.bucket.toString(), plain(p.revenue), plain(p.cogs), plain(p.grossProfit),
-                        plain(p.payroll), plain(p.netProfit)));
+                t.footer.add(exp
+                        ? List.of(p.bucket.toString(), plain(p.revenue), plain(p.cogs), plain(p.grossProfit),
+                                plain(p.payroll), plain(p.otherExpenses), plain(p.netProfit))
+                        : List.of(p.bucket.toString(), plain(p.revenue), plain(p.cogs), plain(p.grossProfit),
+                                plain(p.payroll), plain(p.netProfit)));
             }
         }
         int kind = format.getSelectedIndex();
