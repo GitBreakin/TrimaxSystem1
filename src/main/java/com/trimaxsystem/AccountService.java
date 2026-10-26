@@ -178,7 +178,7 @@ public final class AccountService {
         }
         if (!EmailService.isConfigured()) {
             throw new AuthService.AuthException(
-                    "Email is not configured. Set TRIMAX SMTP environment variables before creating employee accounts.");
+                    EmailService.notSetUpMessage("the new employee cannot be sent a setup code") + "\nNothing was saved.");
         }
 
         String username = employeeUsername(fullName, roleName);
@@ -208,8 +208,8 @@ public final class AccountService {
                     }
                 }
 
-                // Email a one-time setup code. If delivery fails, roll back account creation too.
-                AuthService.createEmployeeSetupCode(conn, username, email, fullName);
+                // The phone sign-in and its temporary password are made right after this
+                // (EmployeeOnboarding); the password is emailed then.
                 conn.commit();
                 return username;
             } catch (SQLException | AuthService.AuthException ex) {

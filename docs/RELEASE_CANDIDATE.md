@@ -21,6 +21,8 @@ creates accounts, sends staff emails or changes the live database. The same file
 | P1-2 | Security | Supabase Auth "leaked password protection" is off (advisor WARN). | Supabase dashboard → Authentication → password security. May need a paid plan. | Lance |
 | P2-1 | Merge | Android `master` `1747cab` and the RC's `cf09946`/`ab62a61` set different liquid-glass opacity. A plain merge mixed them. | RC keeps the later "crystal clear" values (the RC tree equals `feature/stage-g-reports`). | Check on a phone |
 | P2-3 | Usability | Agents & Drivers: the **Create Employee Account** button wrapped out of sight on common screen widths (found by Lance, 2026-10-26). | Fixed in the RC: the button has its own row, and toolbar rows now grow when their controls wrap (all 5 pages that use them; checked at 1280, 1536 and 1920 px and after resizing). | Fixed |
+| P1-3 | Usability / security | An Agent or Driver created on the Desktop could not sign in on the phone until someone added the user in the Supabase Dashboard by hand and pressed "Link mobile sign-in". The provisioning queue meant for this had no caller, and its finish function audited as `provisioning`, which production's `audit_log` foreign key refuses, so it could never have worked. | Branch `feature/auto-mobile-sign-in` (Desktop) + `feature/setup-code-sign-in` (Android): Create Employee Account creates and links the Supabase sign-in through a one-time ticket and the Edge Function `trimax-accounts` (secret key only on the server); the person sets the phone password with the emailed code. `sql/20261026_01` (+ rollback `_94`). Applied + deployed 2026-10-26 (approval). Live: sign-ins are created and linked (agent_kenjie 13:53). Lance found the emailed code confusing (typed into the sign-in screen), so new accounts now get a temporary password (`Name-XXXX`, shown once + emailed, must be changed at the first sign-in); Edge Function v2 deployed 2026-10-26 15:31 (approval). **Live test passed** (agent_nicole): Create mobile sign-in 15:43, phone sign-in with the temporary password 15:45, own password chosen 15:46 (must_change_password cleared), signed in again with it 15:46 |
+| P2-4 | Usability | **Create Employee Account** stopped with "Email is not configured" on Lance's laptop (2026-10-26). The email settings were read only from Windows environment variables, which were never set; nothing was saved. | Fixed in the RC: the `smtp.*` keys can go in the private `trimax.properties` (environment variables still win). The message names the missing keys and the file. **System Settings → Email** shows the status and sends a test email. A failed send says why (for example, Gmail needs an App Password). Sending now always uses TLS 1.2+ and checks the server certificate. See `SMTP_EMAIL_SETUP.md`. | Fixed; each PC needs the Gmail App Password in `trimax.properties` |
 | P2-2 | Exposure | Both repositories are public. The Android app's Supabase key is a publishable key (meant to be public); that is fine. | Owner decision on visibility. | Owner |
 | P3-1 | Performance | Advisor INFO: 3 foreign keys without an index, 4 unused indexes. | Leave until there is real traffic. | Later |
 
@@ -79,6 +81,7 @@ It was then compared object by object with production:
 1. ~~`20261025_06_product_images.sql`, then deploy `trimax-admin-media` v2 (Stage F).~~ **Done 2026-10-26** with approval. Verified: function md5 and grants, bucket, no rows changed, handler sha256, advisors unchanged.
 2. `20261025_07_alert_resolution.sql` (Stage G).
 3. Running "Secure them now" once (P1-1). It changes 7 stored values.
+4. ~~`20261026_01_employee_mobile_sign_in.sql`, then deploy the Edge Function `trimax-accounts` (verify_jwt = false) (P1-3).~~ **Done 2026-10-26 13:49** with approval. Verified: the 5 function checksums equal the tested files, grants (service role only), no row counts changed, advisors unchanged except the new ticket table (INFO).
 
 Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A keeps resolutions).
 
@@ -88,7 +91,9 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | --- | --- |
 | `sql/tests/run_tests.sh` on PostgreSQL 16 (all stages, rollbacks, re-apply) | ALL DATABASE TESTS PASSED (271 checks) |
 | Edge Function handler (Node 22, fake Supabase) | ALL EDGE FUNCTION CHECKS PASSED (21) |
-| Desktop: whole app compiled (stand-ins for javax.mail, POI, PDFBox) + all 8 unit-test classes | 27/27 passed |
+| Desktop: whole app compiled (real javax.mail 1.6.2 built from source; stand-ins for POI, PDFBox) + all 9 unit-test classes | 35/35 passed |
+| Desktop: email with the real javax.mail 1.6.2 against local test SMTP servers, settings only in `trimax.properties`: plain, STARTTLS (default), port 465 SSL; wrong password, certificate for another name, nothing listening, unknown server, environment variable over the file | all sent or refused as expected, each with a plain-language reason |
+| Desktop: Create Employee Account on a test database | email sent: account and hashed code saved, email has the username and code; wrong password or no settings: nothing saved |
 | Desktop: report export equals screen, every tab and grouping | 111/111 |
 | Desktop: password securing SQL on a test DB (compare-and-set, login still works, wrong password refused) | passed |
 | Android: 12 of 13 unit-test classes (stand-ins for Android classes) | 46/46 passed |
@@ -114,6 +119,7 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 
 - [ ] `mvn -q test` passes (or IntelliJ → Maven → Lifecycle → test).
 - [ ] Sign in, wrong password message, lockout after 5 wrong tries, forgot password email (SMTP set).
+- [ ] System Settings → Email says "Set up", and **Send test email** arrives (Gmail App Password in `trimax.properties`).
 - [ ] Create employee account → setup email arrives; mobile link works.
 - [ ] Booking review: confirm, assign driver and vehicle; a phone booking appears.
 - [ ] Customers, Inventory (add/edit; pictures only after `_06` + v2), Drivers/Live GPS, Attendance photo opens.

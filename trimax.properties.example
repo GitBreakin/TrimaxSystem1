@@ -10,3 +10,10 @@ db.password=YOUR_DATABASE_PASSWORD
 # trimax-admin-media Edge Function. Not a secret. If left out, it is worked out from db.user
 # ("postgres.<project ref>"). No storage or service key is ever needed on this PC.
 # supabase.url=https://YOUR_PROJECT_REF.supabase.co
+
+# Email for employee password-setup codes and password resets (see SMTP_EMAIL_SETUP.md).
+# Gmail: smtp.password is a 16-letter App Password, not the normal password. Restart TRIMAX after changes.
+# smtp.host=smtp.gmail.com
+# smtp.user=YOUR_TRIMAX_GMAIL@gmail.com
+# smtp.password=YOUR_16_LETTER_APP_PASSWORD
+# Optional: smtp.port=587 (or 465 for SSL), smtp.from=sender address (defaults to smtp.user)

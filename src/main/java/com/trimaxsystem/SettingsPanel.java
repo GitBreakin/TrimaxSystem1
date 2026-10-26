@@ -31,6 +31,10 @@ public class SettingsPanel extends JPanel {
     private final JLabel pwStatus = value("Not checked yet");
     private final JButton checkPw = UiKit.secondaryButton("Check password storage");
     private final JButton securePw = UiKit.primaryButton("Secure them now");
+    private final JLabel mailStatus = value(" ");
+    private final JLabel mailFile = value(" ");
+    private final JLabel mailTest = value("Not tested in this session");
+    private final JButton testMail = UiKit.secondaryButton("Send test email...");
 
     public SettingsPanel() {
         super(new BorderLayout());
@@ -86,6 +90,26 @@ public class SettingsPanel extends JPanel {
         checkPw.addActionListener(e -> checkPasswords());
         securePw.addActionListener(e -> securePasswords());
         col.add(pw);
+
+        JPanel mail = section("Email (employee setup codes and password resets)");
+        row(mail, "Status", mailStatus);
+        row(mail, "Settings file", mailFile);
+        row(mail, "Last test", mailTest);
+        JLabel mailNote = new JLabel("<html><div style='width:420px'>The values come from trimax.properties on this computer "
+                + "(smtp.host, smtp.port, smtp.user, smtp.password, smtp.from) or from TRIMAX_SMTP_* environment variables. "
+                + "The password is never shown. Restart TRIMAX after changing them. A test email does not change any data.</div></html>");
+        mailNote.setForeground(Theme.MUTED);
+        mailNote.setFont(Theme.SUBTLE);
+        mailNote.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mail.add(mailNote);
+        JPanel mailButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 6));
+        mailButtons.setOpaque(false);
+        mailButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
+        mailButtons.add(testMail);
+        mail.add(mailButtons);
+        testMail.addActionListener(e -> sendTestEmail());
+        showMailSettings();
+        col.add(mail);
 
         JPanel map = section("Map provider");
         row(map, "Provider", "OpenStreetMap public tile server (no API key is used or stored)");
@@ -223,6 +247,62 @@ public class SettingsPanel extends JPanel {
                             "Secure stored passwords", JOptionPane.ERROR_MESSAGE);
                 }
                 checkPasswords();   // show what the database says now
+            }
+        }.execute();
+    }
+
+    private void showMailSettings() {
+        EmailService.Settings m = EmailService.settings();
+        if (m.complete()) {
+            mailStatus.setText("Set up: " + m.describe());
+            mailStatus.setForeground(Theme.TEXT);
+        } else {
+            mailStatus.setText("NOT set up. Missing: " + String.join(", ", m.missing));
+            mailStatus.setForeground(Theme.DANGER);
+        }
+        String file = DatabaseConnection.settingsFile();
+        mailFile.setText(file == null ? "No trimax.properties found (environment variables only)" : file);
+        testMail.setEnabled(m.complete());
+    }
+
+    private void sendTestEmail() {
+        AuthService.Session s = AuthService.current();
+        Object typed = JOptionPane.showInputDialog(this, "Send a test email to:", "Send test email",
+                JOptionPane.QUESTION_MESSAGE, null, null, s == null || s.email == null ? "" : s.email);
+        final String to = typed == null ? "" : typed.toString().trim();
+        if (to.isEmpty()) return;
+        if (!to.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) {
+            JOptionPane.showMessageDialog(this, "Enter one email address, for example name@gmail.com.",
+                    "Send test email", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        testMail.setEnabled(false);
+        mailTest.setText("Sending to " + to + "...");
+        mailTest.setForeground(Theme.TEXT);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                AuthService.requireAdmin();
+                EmailService.sendTest(to);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                testMail.setEnabled(true);
+                String when = ZonedDateTime.now().toLocalTime().withNano(0).toString();
+                try {
+                    get();
+                    mailTest.setText("Sent to " + to + " at " + when + ". Check that inbox (and Spam).");
+                    mailTest.setForeground(Theme.OK);
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    String reason = c instanceof AuthService.AuthException ? c.getMessage() : EmailService.explain(c);
+                    mailTest.setText("FAILED at " + when);
+                    mailTest.setForeground(Theme.DANGER);
+                    JOptionPane.showMessageDialog(SettingsPanel.this, "The test email was not sent.\n" + reason,
+                            "Send test email", JOptionPane.ERROR_MESSAGE);
+                }
             }
         }.execute();
     }
