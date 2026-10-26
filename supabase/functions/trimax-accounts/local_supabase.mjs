@@ -7,6 +7,7 @@
 //                                         with request.jwt.claims set like PostgREST does
 //   /auth/v1/admin/users[/<id>]        -> insert / update auth.users (service key only)
 //   /auth/v1/token?grant_type=password -> checks auth.users (password kept as sha256 here, test only)
+//   PUT /auth/v1/user                  -> the signed-in user changes their password / user_metadata
 //
 // Run:  PGDATABASE=trimax_demo PORT=54400 node --experimental-strip-types local_supabase.mjs
 // Never point it at Supabase. Control: POST /__test/fail-next-finish makes the next finish call fail once.
@@ -96,8 +97,9 @@ const server = http.createServer((req, res) => {
 
     if (url.pathname === "/auth/v1/admin/users" && req.method === "POST") {
       if (req.headers["apikey"] !== SECRET) return send(res, 401, { msg: "service key required" });
-      const r = sql(`insert into auth.users (email, email_confirmed_at, raw_app_meta_data, encrypted_password) values (`
+      const r = sql(`insert into auth.users (email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, encrypted_password) values (`
         + `lower(${lit(body.email)}), case when ${lit(!!body.email_confirm)} then now() end, coalesce(${lit(body.app_metadata ?? {})}, '{}'), `
+        + `coalesce(${lit(body.user_metadata ?? {})}, '{}'), `
         + `encode(sha256(convert_to(${lit(body.password ?? "")}, 'UTF8')), 'hex')) returning json_build_object('id', id, 'email', email);`);
       if (r.ok) return send(res, 200, r.out);
       if (r.code === "23505") return send(res, 422, { code: "email_exists", msg: "A user with this email address has already been registered" });
@@ -106,18 +108,29 @@ const server = http.createServer((req, res) => {
     const one = /^\/auth\/v1\/admin\/users\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (one && req.method === "PUT") {
       if (req.headers["apikey"] !== SECRET) return send(res, 401, { msg: "service key required" });
-      const r = sql(`update auth.users set encrypted_password = encode(sha256(convert_to(${lit(body.password ?? "")}, 'UTF8')), 'hex') `
+      const r = sql(`update auth.users set `
+        + (body.password ? `encrypted_password = encode(sha256(convert_to(${lit(body.password)}, 'UTF8')), 'hex'), ` : "")
+        + `raw_user_meta_data = raw_user_meta_data || coalesce(${lit(body.user_metadata ?? {})}, '{}') `
         + `where id = ${lit(one[1])} returning json_build_object('id', id);`);
       if (r.ok && r.out) return send(res, 200, r.out);
       return send(res, 404, { msg: "User not found" });
     }
     if (url.pathname === "/auth/v1/token" && url.searchParams.get("grant_type") === "password") {
       if (req.headers["apikey"] !== PUBLISHABLE) return send(res, 401, { msg: "bad key" });
-      const r = sql(`select json_build_object('id', id, 'email', email) from auth.users where lower(email) = lower(${lit(body.email ?? "")}) `
+      const r = sql(`select json_build_object('id', id, 'email', email, 'user_metadata', raw_user_meta_data) from auth.users where lower(email) = lower(${lit(body.email ?? "")}) `
         + `and email_confirmed_at is not null and encrypted_password = encode(sha256(convert_to(${lit(body.password ?? "")}, 'UTF8')), 'hex');`);
       if (!r.ok || !r.out) return send(res, 400, { code: "invalid_credentials", msg: "Invalid login credentials" });
       const user = JSON.parse(r.out);
       return send(res, 200, { access_token: `fake-token.${user.id}`, token_type: "bearer", expires_in: 3600, refresh_token: "fake-refresh", user });
+    }
+    if (url.pathname === "/auth/v1/user" && req.method === "PUT") {
+      const who = caller(req);
+      if (who.role !== "authenticated") return send(res, 401, { msg: "sign in first" });
+      const r = sql(`update auth.users set `
+        + (body.password ? `encrypted_password = encode(sha256(convert_to(${lit(body.password)}, 'UTF8')), 'hex'), ` : "")
+        + `raw_user_meta_data = raw_user_meta_data || coalesce(${lit(body.data ?? {})}, '{}') `
+        + `where id = ${lit(who.claims.sub)} returning json_build_object('id', id, 'email', email);`);
+      return r.ok && r.out ? send(res, 200, r.out) : send(res, 400, { msg: "update failed" });
     }
     if (url.pathname === "/auth/v1/logout") { res.writeHead(204); return res.end(); }
     send(res, 404, { msg: "not found in the local stand-in" });

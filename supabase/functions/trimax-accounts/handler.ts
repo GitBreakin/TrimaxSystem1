@@ -1,14 +1,16 @@
 // trimax-accounts: Supabase sign-ins for TRIMAX Agents and Drivers, without the Supabase Dashboard.
 //
-//   provision     POST {"action": "provision", "ticket": "<uuid>"}
+//   provision     POST {"action": "provision", "ticket": "<uuid>", "temporary_password": "<optional>"}
 //                 From the Desktop, right after an admin creates an account (or presses "Create mobile
 //                 sign-in"). The ticket comes from trimax_private.issue_provisioning_ticket, which only an
 //                 Active Admin can get, over the Desktop's database connection. This function redeems it
 //                 (public.trimax_service_claim_provisioning_ticket), creates the Auth user with the Auth
-//                 Admin API (email confirmed, a random password nobody knows, app_metadata
-//                 trimax_provisioned + trimax_username) and records + links it with the existing
-//                 public.trimax_service_finish_provisioning. A retry links the Auth user a cut-off earlier
-//                 call made instead of creating a second one.
+//                 Admin API (email confirmed, app_metadata trimax_provisioned + trimax_username) and records
+//                 + links it with the existing public.trimax_service_finish_provisioning. A retry links the
+//                 Auth user a cut-off earlier call made instead of creating a second one.
+//                 With "temporary_password" (made by the Desktop, shown to the admin and emailed) that is the
+//                 first password and user_metadata.must_change_password = true, so the phone asks for a new
+//                 one at the first sign-in. Without it the password is random and nobody knows it.
 //
 //   set_password  POST {"action": "set_password", "email": "...", "code": "...", "password": "..."}
 //                 From the phone ("Set up or reset password"). The code is the one-time setup / reset
@@ -119,6 +121,14 @@ async function finish(key: string, requestId: number, outcome: string, authUserI
 async function provision(key: string, body: Record<string, unknown>): Promise<Response> {
   const ticket = body.ticket;
   if (typeof ticket !== "string" || !UUID.test(ticket)) return fail(400, "Invalid ticket.");
+  const temporary = body.temporary_password;
+  if (temporary !== undefined && temporary !== null) {
+    // Checked before the ticket is used, so a bad one costs nothing.
+    if (typeof temporary !== "string" || passwordProblem(temporary) !== null) {
+      return fail(400, "The temporary password does not meet the password rules.");
+    }
+  }
+  const firstPassword = typeof temporary === "string" ? temporary : null;
 
   const c = await rpc(key, "trimax_service_claim_provisioning_ticket", { p_ticket: ticket });
   if (!c.ok) {
@@ -128,7 +138,8 @@ async function provision(key: string, body: Record<string, unknown>): Promise<Re
   }
   const claim = c.data as Claim;
   if (claim.status === "invited" || claim.status === "linked") {
-    return json(200, { status: claim.status, message: "This account already has a mobile sign-in." });
+    // Finished by an earlier call: nothing was changed now (and no temporary password was set).
+    return json(200, { status: "exists", message: "This account already has a mobile sign-in." });
   }
   if (claim.status === "failed") return json(200, { status: "failed", message: claim.message ?? "The sign-in could not be created." });
   if (claim.status === "busy") return json(409, { status: "busy", message: claim.message ?? "Try again in a minute." });
@@ -146,6 +157,18 @@ async function provision(key: string, body: Record<string, unknown>): Promise<Re
         "A Supabase sign-in with this email already exists (made outside TRIMAX). Open the account and use \"Link mobile sign-in\".");
     }
     // Made by an earlier call that was cut off before it was recorded: link it, do not make a second one.
+    if (firstPassword) {
+      const put = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${claim.existing_auth_user_id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(key), "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ password: firstPassword, user_metadata: { must_change_password: true } }),
+      });
+      await put.body?.cancel();
+      if (!put.ok) {
+        return finish(key, claim.request_id, "failed", null,
+          `Supabase Auth did not take the temporary password (HTTP ${put.status}). Try again.`);
+      }
+    }
     return finish(key, claim.request_id, "linked", claim.existing_auth_user_id, null);
   }
 
@@ -154,9 +177,10 @@ async function provision(key: string, body: Record<string, unknown>): Promise<Re
     headers: { ...authHeaders(key), "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
       email: claim.email,
-      password: randomPassword(),
+      password: firstPassword ?? randomPassword(),
       email_confirm: true,
       app_metadata: { trimax_provisioned: true, trimax_username: claim.username },
+      user_metadata: { must_change_password: firstPassword !== null },
     }),
   });
   let user: { id?: string } = {};
@@ -191,7 +215,7 @@ async function setPassword(key: string, body: Record<string, unknown>): Promise<
   const put = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.data.auth_user_id}`, {
     method: "PUT",
     headers: { ...authHeaders(key), "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, user_metadata: { must_change_password: false } }),
   });
   if (!put.ok) {
     let reason = "";

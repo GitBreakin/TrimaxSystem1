@@ -112,6 +112,38 @@ r = await handle(post({ action: "provision", ticket: T }));
 b = await r.json();
 check(r.status === 502 && /again/.test(b.error), "user created but not recorded: 502 and the admin is told to press again (the retry links it)");
 
+// ---- temporary password (shown to the admin, emailed, must be changed at the first sign-in)
+reset(); claim = { request_id: 20, status: "processing", username: "agent_kenjie", email: "kenjie@example.test", existing_auth_user_id: null };
+r = await handle(post({ action: "provision", ticket: T, temporary_password: "Kenjie-7Q4M" }));
+b = await r.json();
+let made = JSON.parse(seen.find((s) => s.url === "/auth/v1/admin/users").body);
+check(r.status === 200 && b.status === "invited" && made.password === "Kenjie-7Q4M" && made.user_metadata?.must_change_password === true,
+  "temporary password: it is the first password and the user must change it");
+check(!JSON.stringify(b).includes("Kenjie-7Q4M"), "the temporary password is not echoed back");
+
+reset(); claim = { request_id: 21, status: "processing", username: "agent_x", email: "x@example.test", existing_auth_user_id: null };
+r = await handle(post({ action: "provision", ticket: T }));
+made = JSON.parse(seen.find((s) => s.url === "/auth/v1/admin/users").body);
+check(made.user_metadata?.must_change_password === false && made.password.length >= 40, "no temporary password: random one, no change asked");
+
+reset();
+r = await handle(post({ action: "provision", ticket: T, temporary_password: "short" }));
+check(r.status === 400 && seen.length === 0, "a weak temporary password is refused before the ticket is used");
+
+reset(); claim = { request_id: 22, status: "processing", username: "driver_ana", email: "ana@example.test",
+  existing_auth_user_id: AUTH, existing_auth_created_by_trimax: true, existing_auth_linked_username: null };
+r = await handle(post({ action: "provision", ticket: T, temporary_password: "Ana-2K9Q-x" }));
+b = await r.json();
+const relink = seen.find((s) => s.method === "PUT");
+check(b.status === "linked" && relink && relink.url === `/auth/v1/admin/users/${AUTH}`
+  && JSON.parse(relink.body).password === "Ana-2K9Q-x" && JSON.parse(relink.body).user_metadata.must_change_password === true,
+  "retry/relink: the TRIMAX-made user gets the new temporary password, no second user");
+
+reset(); codeAnswer = { ok: true, auth_user_id: AUTH };
+await handle(post({ action: "set_password", email: "tim@example.test", code: "ABCD2345", password: "Sunflower7" }));
+check(JSON.parse(seen.find((s) => s.method === "PUT").body).user_metadata.must_change_password === false,
+  "setting a password with a code clears must_change_password");
+
 for (const [status, label] of [["busy", "busy"], ["failed", "failed"], ["linked", "already linked"]]) {
   reset(); claim = { request_id: 13, status, message: "m" };
   r = await handle(post({ action: "provision", ticket: T }));
