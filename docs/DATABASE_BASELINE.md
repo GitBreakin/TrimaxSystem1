@@ -11,7 +11,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Applied and deployed 2026-10-25**, with the owner's approval |
 | `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Applied and deployed 2026-10-26**, with the owner's approval |
 | `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
-| `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval |
+| `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
 
 ## Files (run in this order)
 
