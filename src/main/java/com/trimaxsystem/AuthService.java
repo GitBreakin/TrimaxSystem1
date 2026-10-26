@@ -337,7 +337,8 @@ public final class AuthService {
     static void createEmployeeSetupCode(Connection conn, String username, String email, String fullName)
             throws SQLException, AuthException {
         if (!EmailService.isConfigured()) {
-            throw new AuthException("Email delivery is not configured. Set the TRIMAX SMTP environment variables first.");
+            throw new AuthException(EmailService.notSetUpMessage("the new employee cannot be sent a setup code")
+                    + "\nNothing was saved.");
         }
 
         StringBuilder code = new StringBuilder();
@@ -361,15 +362,10 @@ public final class AuthService {
         try {
             EmailService.sendSetupCode(email, fullName, username, code.toString());
         } catch (Exception e) {
-            System.err.println(
-                    "Failed to send employee setup email: "
-                            + e.getClass().getSimpleName()
-                            + ": " + e.getMessage()
-            );
-            throw new AuthException(
-                    "The setup email could not be sent. Check the SMTP configuration and try again.",
-                    e
-            );
+            String reason = EmailService.explain(e);
+            System.err.println("Failed to send employee setup email: " + e.getClass().getSimpleName() + ": " + reason);
+            throw new AuthException("The setup email could not be sent, so the account was not created.\n" + reason
+                    + "\nYou can check the email settings with System Settings > Email > Send test email.", e);
         }
     }
 
@@ -565,14 +561,13 @@ public final class AuthService {
         return letter && digit ? null : "Password must contain at least one letter and one number.";
     }
 
-    /**
-     * Delivers the reset code to the user. NOT CONNECTED YET: add your email sending here
-     * (SMTP, SendGrid, Resend, ...) and then set DEV_SHOW_RESET_CODE to false.
-     */
+    /** Emails the reset code to the user (SMTP settings: see EmailService). */
     private static void sendResetCode(String email, String fullName, String code) throws AuthException {
         try {
             EmailService.sendSetupCode(email, fullName, "", code);
         } catch (Exception e) {
+            // The person resetting only gets a general message; the reason is for whoever runs this PC.
+            System.err.println("Password reset email not sent: " + EmailService.explain(e));
             throw new AuthException("The password reset email could not be sent. Please try again later.", e);
         }
     }

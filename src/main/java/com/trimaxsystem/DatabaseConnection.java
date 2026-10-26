@@ -18,6 +18,7 @@ public class DatabaseConnection {
     };
 
     private static volatile Properties fileProps;
+    private static volatile String filePath;   // the trimax.properties that was read, or null
 
     public static Connection getConnection() throws SQLException {
         Properties props = new Properties();
@@ -55,6 +56,22 @@ public class DatabaseConnection {
         return "https://" + ref + ".supabase.co";
     }
 
+    /**
+     * An optional setting: the environment variable wins, otherwise the key in trimax.properties.
+     * Null when neither has a value. Never logs the value.
+     */
+    static String setting(String envName, String fileKey) {
+        String value = System.getenv(envName);
+        if (value == null || value.isBlank()) value = loadFile().getProperty(fileKey);
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** Full path of the trimax.properties this app read, or null when there is none. */
+    static String settingsFile() {
+        loadFile();
+        return filePath;
+    }
+
     /** Environment variable wins; otherwise the properties file. Never logs the value. */
     private static String require(String envName, String fileKey) throws SQLException {
         String value = System.getenv(envName);
@@ -80,6 +97,7 @@ public class DatabaseConnection {
                 if (Files.isRegularFile(path)) {
                     try (InputStream in = Files.newInputStream(path)) {
                         p.load(in);
+                        filePath = path.toAbsolutePath().toString();
                         break;
                     } catch (IOException ignored) {
                         // unreadable file: treated the same as a missing one

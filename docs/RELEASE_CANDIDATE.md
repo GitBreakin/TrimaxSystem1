@@ -21,6 +21,7 @@ creates accounts, sends staff emails or changes the live database. The same file
 | P1-2 | Security | Supabase Auth "leaked password protection" is off (advisor WARN). | Supabase dashboard → Authentication → password security. May need a paid plan. | Lance |
 | P2-1 | Merge | Android `master` `1747cab` and the RC's `cf09946`/`ab62a61` set different liquid-glass opacity. A plain merge mixed them. | RC keeps the later "crystal clear" values (the RC tree equals `feature/stage-g-reports`). | Check on a phone |
 | P2-3 | Usability | Agents & Drivers: the **Create Employee Account** button wrapped out of sight on common screen widths (found by Lance, 2026-10-26). | Fixed in the RC: the button has its own row, and toolbar rows now grow when their controls wrap (all 5 pages that use them; checked at 1280, 1536 and 1920 px and after resizing). | Fixed |
+| P2-4 | Usability | **Create Employee Account** stopped with "Email is not configured" on Lance's laptop (2026-10-26). The email settings were read only from Windows environment variables, which were never set; nothing was saved. | Fixed in the RC: the `smtp.*` keys can go in the private `trimax.properties` (environment variables still win). The message names the missing keys and the file. **System Settings → Email** shows the status and sends a test email. A failed send says why (for example, Gmail needs an App Password). Sending now always uses TLS 1.2+ and checks the server certificate. See `SMTP_EMAIL_SETUP.md`. | Fixed; each PC needs the Gmail App Password in `trimax.properties` |
 | P2-2 | Exposure | Both repositories are public. The Android app's Supabase key is a publishable key (meant to be public); that is fine. | Owner decision on visibility. | Owner |
 | P3-1 | Performance | Advisor INFO: 3 foreign keys without an index, 4 unused indexes. | Leave until there is real traffic. | Later |
 
@@ -88,7 +89,9 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | --- | --- |
 | `sql/tests/run_tests.sh` on PostgreSQL 16 (all stages, rollbacks, re-apply) | ALL DATABASE TESTS PASSED (271 checks) |
 | Edge Function handler (Node 22, fake Supabase) | ALL EDGE FUNCTION CHECKS PASSED (21) |
-| Desktop: whole app compiled (stand-ins for javax.mail, POI, PDFBox) + all 8 unit-test classes | 27/27 passed |
+| Desktop: whole app compiled (real javax.mail 1.6.2 built from source; stand-ins for POI, PDFBox) + all 9 unit-test classes | 35/35 passed |
+| Desktop: email with the real javax.mail 1.6.2 against local test SMTP servers, settings only in `trimax.properties`: plain, STARTTLS (default), port 465 SSL; wrong password, certificate for another name, nothing listening, unknown server, environment variable over the file | all sent or refused as expected, each with a plain-language reason |
+| Desktop: Create Employee Account on a test database | email sent: account and hashed code saved, email has the username and code; wrong password or no settings: nothing saved |
 | Desktop: report export equals screen, every tab and grouping | 111/111 |
 | Desktop: password securing SQL on a test DB (compare-and-set, login still works, wrong password refused) | passed |
 | Android: 12 of 13 unit-test classes (stand-ins for Android classes) | 46/46 passed |
@@ -114,6 +117,7 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 
 - [ ] `mvn -q test` passes (or IntelliJ → Maven → Lifecycle → test).
 - [ ] Sign in, wrong password message, lockout after 5 wrong tries, forgot password email (SMTP set).
+- [ ] System Settings → Email says "Set up", and **Send test email** arrives (Gmail App Password in `trimax.properties`).
 - [ ] Create employee account → setup email arrives; mobile link works.
 - [ ] Booking review: confirm, assign driver and vehicle; a phone booking appears.
 - [ ] Customers, Inventory (add/edit; pictures only after `_06` + v2), Drivers/Live GPS, Attendance photo opens.
