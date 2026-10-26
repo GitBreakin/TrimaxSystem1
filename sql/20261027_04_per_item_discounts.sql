@@ -16,7 +16,7 @@
 --   2. trimax_private.item_discount_max, apply_item_discounts
 --   3. refresh_booking_total: discount = item discounts + any old whole-order discount
 --   4. booking_json: each item has discount_per_unit and line_total; discount.type 'PER_ITEM'
---   5. phone: trimax_agent_discount_quote (per item), trimax_agent_create_booking (discount per item, same
+--   5. phone: trimax_list_products (+ discount_allowed, max_discount_per_unit), trimax_agent_discount_quote (per item), trimax_agent_create_booking (discount per item, same
 --      arguments), trimax_agent_set_item_discounts (new), trimax_agent_set_discount (only clears now)
 --   6. Desktop: save_product gains p_agent_discount (default null = keep), so an older Desktop still works
 --
@@ -575,6 +575,32 @@ begin
 
     return trimax_private.booking_json(v_booking_id, false)
            || jsonb_build_object('already_existed', false, 'customer_matched_existing', true);
+end $function$;
+
+-- The phone's product list: each product says whether the agent may discount it and the most per piece,
+-- so the item screen can offer "Less" right under the price.
+create or replace function public.trimax_list_products()
+ returns jsonb
+ language plpgsql
+ stable security definer
+ set search_path to 'public', 'pg_temp'
+as $function$
+begin
+    perform trimax_private.require_account('AGENT');
+    return coalesce((
+        select jsonb_agg(jsonb_build_object(
+                   'product_id', p.product_id,
+                   'product_name', p.product_name,
+                   'price', p.price,
+                   'stock', p.stock,
+                   'image_path', p.image_path,
+                   -- 20261027_04: whether the agent may take something off a piece, and the most (never the puhunan)
+                   'discount_allowed', trimax_private.item_discount_max(p.price, p.capital_cost, p.min_markup,
+                                                                        p.agent_discount_allowed) > 0,
+                   'max_discount_per_unit', trimax_private.item_discount_max(p.price, p.capital_cost, p.min_markup,
+                                                                             p.agent_discount_allowed))
+                   order by lower(p.product_name), p.product_id)
+        from public.products p), '[]'::jsonb);
 end $function$;
 
 -- ----------------------------------------------------------------------------------------------- 6

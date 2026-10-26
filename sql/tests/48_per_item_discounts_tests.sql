@@ -80,6 +80,14 @@ select test.ok((:'q'::jsonb ->> 'max_discount')::numeric = 8 and (:'q'::jsonb ->
                and :'q'::text !~ '(capital_cost|puhunan".*:|min_markup)',
                'the order: subtotal 78, at most 8.00 off in all; the puhunan itself is never sent');
 
+select public.trimax_list_products() as plist \gset
+select test.ok((select (e ->> 'discount_allowed')::boolean and (e ->> 'max_discount_per_unit')::numeric = 4
+                  from jsonb_array_elements(:'plist'::jsonb) e where (e ->> 'product_id')::int = :sprite)
+               and (select not (e ->> 'discount_allowed')::boolean and (e ->> 'max_discount_per_unit')::numeric = 0
+                      from jsonb_array_elements(:'plist'::jsonb) e where (e ->> 'product_id')::int = :coke)
+               and :'plist'::text !~ '(capital_cost|min_markup|markup_)',
+               'the product list says per item whether a discount is possible and the most per piece (no puhunan)');
+
 -- ================================================================== 4. Booking with a discount on one item
 select public.trimax_agent_create_booking(gen_random_uuid(), :'anas_name', :'anas_contact', :'anas_addr', 14.8, 121.0,
        format('[{"product_id": %s, "quantity": 2, "discount_per_unit": 2}, {"product_id": %s, "quantity": 1}]', :sprite, :coke)::jsonb) as bk \gset

@@ -3,7 +3,7 @@
 --
 -- Puts back the 20261027_01 versions of products_before_write, refresh_booking_total, booking_json,
 -- trimax_agent_discount_quote, trimax_agent_set_discount, trimax_agent_create_booking and the 10-argument
--- save_product, and drops item_discount_max, apply_item_discounts, refresh_booking_total_for,
+-- save_product (and trimax_list_products as 20261025_06 made it), and drops item_discount_max, apply_item_discounts, refresh_booking_total_for,
 -- trimax_agent_set_item_discounts and the 11-argument save_product.
 -- KEEPS all data: products.agent_discount_allowed and booking_items.discount_per_unit with their values.
 -- Note: after a rollback the totals no longer subtract item discounts the next time a booking's lines
@@ -490,6 +490,26 @@ begin
                                         v_new.product_name || substr(v_changes, 1));
     end if;
     return v_id;
+end $function$;
+
+
+-- ---- previous public.trimax_list_products (sql/20261025_06_product_images.sql), unchanged
+create or replace function public.trimax_list_products()
+ returns jsonb
+ language plpgsql
+ stable security definer
+ set search_path to 'public', 'pg_temp'
+as $function$
+begin
+    perform trimax_private.require_account('AGENT');
+    return coalesce((
+        select jsonb_agg(jsonb_build_object(
+                   'product_id', p.product_id,
+                   'product_name', p.product_name,
+                   'price', p.price,
+                   'stock', p.stock,
+                   'image_path', p.image_path) order by lower(p.product_name), p.product_id)
+        from public.products p), '[]'::jsonb);
 end $function$;
 
 revoke all on function trimax_private.products_before_write() from public;
