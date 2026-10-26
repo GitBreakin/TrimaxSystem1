@@ -79,6 +79,9 @@ public class InventoryPanel extends JPanel {
     private final JButton btnRemoveImage = UiKit.secondaryButton("Remove picture");
     private JButton btnAdd, btnUpdate, btnDelete, btnClear, btnRestock, btnAdjust;
 
+    /** Height the product list keeps when the window is short (about six rows); the page scrolls then. */
+    private static final int MIN_TABLE_HEIGHT = 360;
+
     private final StockHistoryPanel historyPanel = new StockHistoryPanel();
     private final JTabbedPane tabs = new JTabbedPane();
 
@@ -87,9 +90,10 @@ public class InventoryPanel extends JPanel {
         setLayout(new BorderLayout());
         setBorder(new EmptyBorder(12, 20, 16, 20));
 
-        JPanel productsTab = new JPanel(new BorderLayout(0, 12));
-        productsTab.setOpaque(false);
-        productsTab.setBorder(new EmptyBorder(10, 0, 0, 0));
+        // Form and search on top, the product list below. On short windows the whole tab scrolls and the
+        // list keeps at least MIN_TABLE_HEIGHT; on tall windows the list fills the rest of the window.
+        UiKit.ScrollPage productsTab = new UiKit.ScrollPage(new BorderLayout(0, 12));
+        productsTab.setBorder(new EmptyBorder(10, 0, 4, 2));
         JPanel controls = new JPanel();
         controls.setOpaque(false);
         controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
@@ -146,10 +150,13 @@ public class InventoryPanel extends JPanel {
         lblCount.setForeground(Theme.MUTED);
         tableHeading.add(lblCount, BorderLayout.EAST);
         tableCard.add(tableHeading, BorderLayout.NORTH);
-        tableCard.add(UiKit.tableScroll(table), BorderLayout.CENTER);
+        JScrollPane tableScroll = UiKit.tableScroll(table);
+        UiKit.passWheelToPageAtEnds(tableScroll);
+        tableCard.add(tableScroll, BorderLayout.CENTER);
+        tableCard.setPreferredSize(new Dimension(600, MIN_TABLE_HEIGHT));
         productsTab.add(tableCard, BorderLayout.CENTER);
 
-        tabs.addTab("Products", productsTab);
+        tabs.addTab("Products", UiKit.pageScroll(productsTab, Theme.BACKGROUND));
         tabs.addTab("Stock history", historyPanel);
         tabs.addChangeListener(e -> {
             if (tabs.getSelectedComponent() == historyPanel) historyPanel.reloadProducts(products.values());

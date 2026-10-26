@@ -11,19 +11,26 @@ import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.Insets;
 import java.awt.LayoutManager;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.MouseWheelEvent;
 import java.util.function.Function;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JViewport;
+import javax.swing.Scrollable;
+import javax.swing.SwingUtilities;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 import javax.swing.table.DefaultTableCellRenderer;
 
 /**
@@ -481,5 +488,132 @@ public final class UiKit {
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = new Insets(3, 0, 3, 0);
         grid.add(v, g);
+    }
+
+    // =====================================================================================
+    // Scrolling pages and slim scroll bars
+    // =====================================================================================
+
+    /**
+     * A page that fills the window when it fits and scrolls when it does not. Put it in a
+     * {@link #pageScroll} and give the part that should take the spare room (a table card) a preferred
+     * height: that height is what it keeps on short windows; on tall windows it grows to fill the rest.
+     */
+    public static final class ScrollPage extends JPanel implements Scrollable {
+        public ScrollPage(LayoutManager layout) {
+            super(layout);
+            setOpaque(false);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 24;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return Math.max(24, visible.height - 48);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;   // never a sideways scroll bar; the form and the table narrow with the window
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            // Stretch to the window while everything fits at its preferred size; otherwise scroll.
+            return getParent() instanceof JViewport && getParent().getHeight() >= getPreferredSize().height;
+        }
+    }
+
+    /** A borderless vertical scroll pane for a {@link ScrollPage}, with the page background. */
+    public static JScrollPane pageScroll(ScrollPage page, Color background) {
+        JScrollPane sp = new JScrollPane(page, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        sp.setBorder(BorderFactory.createEmptyBorder());
+        sp.getViewport().setBackground(background);
+        sp.setBackground(background);
+        sp.getVerticalScrollBar().setUnitIncrement(24);
+        return sp;
+    }
+
+    /**
+     * When the mouse wheel turns over an inner scroll pane (a table inside a scrolling page) that is
+     * already at its top or bottom, or has nothing to scroll, the page scrolls instead of nothing happening.
+     */
+    public static void passWheelToPageAtEnds(JScrollPane inner) {
+        inner.addMouseWheelListener(e -> {
+            JScrollBar bar = inner.getVerticalScrollBar();
+            boolean canScroll = bar.isVisible() && bar.getMaximum() - bar.getVisibleAmount() > bar.getMinimum();
+            boolean atTop = bar.getValue() <= bar.getMinimum();
+            boolean atBottom = bar.getValue() + bar.getVisibleAmount() >= bar.getMaximum();
+            boolean up = e.getWheelRotation() < 0 || e.getPreciseWheelRotation() < 0;
+            if (canScroll && !(up ? atTop : atBottom)) return;   // the table scrolls itself
+            JScrollPane outer = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, inner.getParent());
+            if (outer == null) return;
+            outer.dispatchEvent(new MouseWheelEvent(outer, e.getID(), e.getWhen(), e.getModifiersEx(),
+                    SwingUtilities.convertPoint(inner, e.getPoint(), outer).x,
+                    SwingUtilities.convertPoint(inner, e.getPoint(), outer).y,
+                    e.getXOnScreen(), e.getYOnScreen(), e.getClickCount(), e.isPopupTrigger(),
+                    e.getScrollType(), e.getScrollAmount(), e.getWheelRotation(), e.getPreciseWheelRotation()));
+        });
+    }
+
+    /** A thin rounded scroll bar with no arrows or track (the sidebar uses a light thumb on navy). */
+    public static void slimScrollBar(JScrollBar bar, Color thumb, Color thumbActive) {
+        bar.setUI(new SlimScrollBarUI(thumb, thumbActive));
+        bar.setOpaque(false);
+        bar.setPreferredSize(new Dimension(8, 8));
+        bar.setUnitIncrement(16);
+    }
+
+    private static final class SlimScrollBarUI extends BasicScrollBarUI {
+        private final Color thumb;
+        private final Color active;
+
+        SlimScrollBarUI(Color thumb, Color active) {
+            this.thumb = thumb;
+            this.active = active;
+        }
+
+        @Override
+        protected JButton createDecreaseButton(int orientation) {
+            return noButton();
+        }
+
+        @Override
+        protected JButton createIncreaseButton(int orientation) {
+            return noButton();
+        }
+
+        private static JButton noButton() {
+            JButton b = new JButton();
+            Dimension zero = new Dimension(0, 0);
+            b.setPreferredSize(zero);
+            b.setMinimumSize(zero);
+            b.setMaximumSize(zero);
+            return b;
+        }
+
+        @Override
+        protected void paintTrack(Graphics g, JComponent c, Rectangle r) {
+            // no track: the sidebar colour shows through
+        }
+
+        @Override
+        protected void paintThumb(Graphics g, JComponent c, Rectangle r) {
+            if (r.isEmpty() || !scrollbar.isEnabled()) return;
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(isDragging || isThumbRollover() ? active : thumb);
+            int w = Math.max(2, r.width - 4);
+            g2.fillRoundRect(r.x + 2, r.y + 2, w, Math.max(2, r.height - 4), w, w);
+            g2.dispose();
+        }
     }
 }
