@@ -224,7 +224,7 @@ The server only returns and accepts the signed-in agent's own customers (`trimax
 is deleted at logout, with the customer photos kept on the phone, so a shared phone does not show one
 agent's customers to another.
 
-## Agent discounts per item (`20261027_04`, not applied yet)
+## Agent discounts per item (`20261027_04`, applied 2026-10-27)
 
 | Function | What it does |
 | --- | --- |

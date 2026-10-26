@@ -21,7 +21,11 @@
 --   6. Desktop: save_product gains p_agent_discount (default null = keep), so an older Desktop still works
 --
 -- ORDER: after 20261027_01 (and 02, 03). Re-runnable. Rollback: 20261027_90_rollback_per_item_discounts.sql.
--- NOT applied to production yet.
+-- APPLIED to production on 2026-10-27 (about 04:50 Asia/Manila) with the owner's approval, as migration
+-- 20261027_04_per_item_discounts. Before: production equalled the repository rebuild through 20261027_03
+-- (108/108 fingerprints, d259f5102c05c9ad42f98a2947f3115e). A dry run on a fresh copy of production's rows
+-- changed no row, booking total, profit summary or trend. After: 108/108 fingerprints equal the rebuild
+-- through this file (fc6970f1d80a7debf25635229f2b663d); 0 of 19 products allowed yet (the Admin ticks them).
 -- =====================================================================================================
 
 begin;
