@@ -60,7 +60,7 @@ public class MainFrame extends JFrame {
      * load (successfully or not); the caller then shows the window. Used by the login screen.
      */
     public MainFrame(Runnable onReady) {
-        setTitle("TRI-MAX Goods Trading Management System");
+        setTitle("TRI-MAX Consumer Goods Trading Management System");
         setIconImages(BrandLogo.createWindowIcons());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);
@@ -127,7 +127,7 @@ public class MainFrame extends JFrame {
         JLabel brand = new JLabel("TRI-MAX");
         brand.setFont(Theme.BRAND);
         brand.setForeground(Color.WHITE);
-        JLabel tagline = new JLabel("Booking & Delivery System");
+        JLabel tagline = new JLabel("Consumer Goods Trading");
         tagline.setFont(new Font("SansSerif", Font.PLAIN, 11));
         tagline.setForeground(Theme.ON_NAVY_DIM);
 
@@ -163,37 +163,29 @@ public class MainFrame extends JFrame {
         navScroll.getVerticalScrollBar().setUnitIncrement(16);
         sidebar.add(navScroll, BorderLayout.CENTER);
 
-        // Signed-in admin + sign out, pinned to the bottom
+        // Signed-in admin, pinned to the bottom (Sign out is in the profile menu at the top right).
         AuthService.Session session = AuthService.current();
         JLabel who = new JLabel(session == null ? "Not signed in" : session.fullName);
         who.setFont(Theme.NAV_ON);
         who.setForeground(Color.WHITE);
+        who.setToolTipText(session == null ? null : session.username);
         JLabel role = new JLabel(session == null ? "" : session.role);
         role.setFont(new Font("SansSerif", Font.PLAIN, 12));
         role.setForeground(Theme.ON_NAVY_DIM);
 
-        NavButton signOut = new NavButton("Sign out");
-        signOut.addActionListener(e -> {
-            int choice = JOptionPane.showConfirmDialog(this, "Sign out of TRI-MAX?",
-                    "Sign out", JOptionPane.YES_NO_OPTION);
-            if (choice == JOptionPane.YES_OPTION) {
-                AuthFrame.logout(this);
-            }
-        });
-
-        JPanel footer = new JPanel();
-        footer.setOpaque(false);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-        footer.setBorder(new EmptyBorder(10, 12, 16, 12));
         JPanel whoBox = new JPanel();
         whoBox.setOpaque(false);
         whoBox.setLayout(new BoxLayout(whoBox, BoxLayout.Y_AXIS));
-        whoBox.setBorder(new EmptyBorder(0, 10, 10, 0));
-        whoBox.setAlignmentX(Component.LEFT_ALIGNMENT);
         whoBox.add(who);
+        whoBox.add(Box.createVerticalStrut(2));
         whoBox.add(role);
-        footer.add(whoBox);
-        footer.add(signOut);
+
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.setOpaque(false);
+        footer.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(255, 255, 255, 30)),
+                new EmptyBorder(12, 22, 16, 16)));
+        footer.add(whoBox, BorderLayout.CENTER);
         sidebar.add(footer, BorderLayout.SOUTH);
 
         return sidebar;

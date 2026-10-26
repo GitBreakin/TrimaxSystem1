@@ -234,7 +234,7 @@ public class ReceiptPdfGenerator {
         float y = height - 26 - 10;
 
         // ----- header
-        text(cs, BOLD, 13, left, y, "TRI-MAX Goods Trading");
+        text(cs, BOLD, 13, left, y, "TRI-MAX Consumer Goods Trading");
         textRight(cs, BOLD, 8, right, y + 2, copyLabel);
         y -= 13;
         String title = d.title == null ? "BOOKING RECEIPT" : d.title;

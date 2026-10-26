@@ -20,7 +20,7 @@ final class LoginBrandPanel extends JPanel {
     LoginBrandPanel() {
         super(new GridBagLayout());
         setOpaque(true);
-        getAccessibleContext().setAccessibleName("TRI-MAX Goods Trading, Admin Console");
+        getAccessibleContext().setAccessibleName("TRI-MAX Consumer Goods Trading, Admin Console");
 
         JPanel column = new JPanel();
         column.setOpaque(false);
@@ -34,7 +34,7 @@ final class LoginBrandPanel extends JPanel {
         name.setForeground(Color.WHITE);
         column.add(left(name));
 
-        JLabel trading = new JLabel("Goods Trading");
+        JLabel trading = new JLabel("Consumer Goods Trading");
         trading.setFont(Theme.BRAND.deriveFont(22f));
         trading.setForeground(SOFT);
         column.add(left(trading));
