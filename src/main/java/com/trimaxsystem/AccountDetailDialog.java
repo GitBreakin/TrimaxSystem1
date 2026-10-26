@@ -263,7 +263,7 @@ public class AccountDetailDialog extends JDialog {
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBorder(new EmptyBorder(12, 0, 0, 0));
 
-        JLabel hint = new JLabel("Passwords are never shown here. Phone passwords are set with an emailed setup code.");
+        JLabel hint = new JLabel("Passwords are never stored here. New phone sign-ins get a temporary password, shown once.");
         hint.setFont(new Font("SansSerif", Font.PLAIN, 12));
         hint.setForeground(Theme.MUTED);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -356,41 +356,43 @@ public class AccountDetailDialog extends JDialog {
         }
         int choice = JOptionPane.showConfirmDialog(this,
                 "Create the TRIMAX mobile app sign-in for " + d.name + " (" + d.username + ") with " + d.email + "?\n\n"
-                        + "TRIMAX creates it in Supabase and links it to this account. The person then chooses the\n"
-                        + "phone password with the emailed setup code (use \"Send new setup code\" if it expired).\n\n"
+                        + "TRIMAX creates it in Supabase, links it to this account and makes a temporary password.\n"
+                        + "You see the temporary password once; it is also emailed. The app asks for a new\n"
+                        + "password at the first sign-in.\n\n"
                         + "The phone always uses the role and Active status of this TRIMAX account.",
                 "Create mobile sign-in", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (choice != JOptionPane.OK_OPTION) return;
         busy = true;
         showMessage("Creating mobile sign-in...", false);
-        new SwingWorker<MobileProvisioning.Result, Void>() {
+        new SwingWorker<EmployeeOnboarding.Outcome, Void>() {
             @Override
-            protected MobileProvisioning.Result doInBackground() {
-                return MobileProvisioning.create(d.username);
+            protected EmployeeOnboarding.Outcome doInBackground() {
+                return EmployeeOnboarding.createSignIn(d.username, d.email, d.name);
             }
 
             @Override
             protected void done() {
                 busy = false;
-                MobileProvisioning.Result r;
+                EmployeeOnboarding.Outcome o;
                 try {
-                    r = get();
+                    o = get();
                 } catch (Exception ex) {
-                    r = null;
+                    o = null;
                 }
                 if (AuthService.current() == null) {   // admin access was withdrawn meanwhile
                     dispose();
                     AuthFrame.logout(owner);
                     return;
                 }
-                if (r != null && r.ready()) {
-                    notice = r.describe();
-                    if (onChanged != null) onChanged.run();
-                } else {
+                if (o == null) {
                     notice = null;
-                    JOptionPane.showMessageDialog(AccountDetailDialog.this,
-                            "The mobile sign-in was not created.\n" + (r == null ? "Unexpected error." : r.describe()),
+                    JOptionPane.showMessageDialog(AccountDetailDialog.this, "The mobile sign-in was not created.\nUnexpected error.",
                             "Create mobile sign-in", JOptionPane.WARNING_MESSAGE);
+                } else {
+                    notice = o.temporaryPassword != null ? "Mobile sign-in created; temporary password "
+                            + (o.emailProblem == null ? "emailed." : "NOT emailed (give it to the person).") : null;
+                    EmployeeOnboarding.show(AccountDetailDialog.this, o, false);
+                    if (o.temporaryPassword != null && onChanged != null) onChanged.run();
                 }
                 load();
             }

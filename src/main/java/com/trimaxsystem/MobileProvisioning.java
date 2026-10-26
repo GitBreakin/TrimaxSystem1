@@ -54,8 +54,7 @@ public final class MobileProvisioning {
         public String describe() {
             switch (status) {
                 case "invited":
-                    return "Mobile sign-in created. The person sets the phone password with the code from the email "
-                            + "(TRIMAX app > Set up or reset password).";
+                    return "Mobile sign-in created.";
                 case "linked":
                     return "Mobile sign-in linked" + (message == null ? "." : ": " + message);
                 default:
@@ -78,6 +77,14 @@ public final class MobileProvisioning {
      * Call off the Swing thread. Problems come back as a Result, not as an exception.
      */
     public static Result create(String username) {
+        return create(username, null);
+    }
+
+    /**
+     * Same, with the person's first phone password (see {@link TemporaryPassword}); the app then asks for a
+     * new one at the first sign-in. Null keeps a random password nobody knows.
+     */
+    public static Result create(String username, String temporaryPassword) {
         AuthService.Session admin;
         try {
             admin = AuthService.requireAdmin();
@@ -105,11 +112,11 @@ public final class MobileProvisioning {
             }
             return new Result("error", "Could not reach the database: " + firstLine(e.getMessage()));
         }
-        return send(ticket);
+        return send(ticket, temporaryPassword);
     }
 
     /** Exchanges the ticket with the Edge Function (package-private for tests). */
-    static Result send(String ticket) {
+    static Result send(String ticket, String temporaryPassword) {
         String url;
         try {
             url = DatabaseConnection.supabaseUrl() + FUNCTION;
@@ -120,7 +127,9 @@ public final class MobileProvisioning {
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{\"action\":\"provision\",\"ticket\":\"" + ticket + "\"}"))
+                .POST(HttpRequest.BodyPublishers.ofString("{\"action\":\"provision\",\"ticket\":\"" + ticket + "\""
+                        + (temporaryPassword == null ? "" : ",\"temporary_password\":\"" + jsonEscape(temporaryPassword) + "\"")
+                        + "}"))
                 .build();
         HttpResponse<String> response;
         try {
@@ -144,6 +153,16 @@ public final class MobileProvisioning {
             return new Result("not_installed", "The sign-in service is not set up on the server yet (Edge Function trimax-accounts).");
         }
         return new Result("error", "The sign-in service answered " + response.statusCode() + ". Try again.");
+    }
+
+    static String jsonEscape(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (char c : s.toCharArray()) {
+            if (c == '"' || c == '\\') sb.append('\\').append(c);
+            else if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+            else sb.append(c);
+        }
+        return sb.toString();
     }
 
     /** The value of a top-level string field in a small JSON object, or null (handles escapes). */

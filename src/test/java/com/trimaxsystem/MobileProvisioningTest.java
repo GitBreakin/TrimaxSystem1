@@ -26,13 +26,20 @@ class MobileProvisioningTest {
     }
 
     @Test
+    void temporaryPasswordIsEscapedForJson() {
+        assertEquals("Kenjie-7Q4M", MobileProvisioning.jsonEscape("Kenjie-7Q4M"));
+        assertEquals("a\\\"b\\\\c", MobileProvisioning.jsonEscape("a\"b\\c"));
+    }
+
+    @Test
     void onlyInvitedOrLinkedMeansReady() {
         assertTrue(new MobileProvisioning.Result("invited", null).ready());
         assertTrue(new MobileProvisioning.Result("linked", null).ready());
         for (String s : new String[]{"failed", "busy", "error", "not_installed"}) {
             assertFalse(new MobileProvisioning.Result(s, "x").ready(), s);
         }
-        assertTrue(new MobileProvisioning.Result("invited", null).describe().contains("Set up or reset password"));
+        assertEquals("Mobile sign-in created.", new MobileProvisioning.Result("invited", null).describe());
+        assertFalse(new MobileProvisioning.Result("exists", "This account already has a mobile sign-in.").ready());
         assertEquals("Try again in a minute.", new MobileProvisioning.Result("busy", "Try again in a minute.").describe());
     }
 }

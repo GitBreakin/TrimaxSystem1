@@ -137,34 +137,19 @@ final class CreateEmployeeAccountDialog extends JDialog {
         String contactNumber = contact;
         String role = (String) cmbRole.getSelectedItem();
         setBusy(true);
-        new SwingWorker<Object[], Void>() {
+        new SwingWorker<EmployeeOnboarding.Outcome, Void>() {
             @Override
-            protected Object[] doInBackground() throws Exception {
-                String username = AccountService.createEmployee(fullName, email, contactNumber, role);
-                // The account is saved and the code is emailed; now its Supabase sign-in for the phone.
-                return new Object[]{username, MobileProvisioning.create(username)};
+            protected EmployeeOnboarding.Outcome doInBackground() throws Exception {
+                // The account, then its phone sign-in with a temporary password, then the email.
+                return EmployeeOnboarding.createEmployee(fullName, email, contactNumber, role);
             }
 
             @Override
             protected void done() {
                 setBusy(false);
                 try {
-                    Object[] r = get();
-                    String username = (String) r[0];
-                    MobileProvisioning.Result mobile = (MobileProvisioning.Result) r[1];
-                    String text = "Employee account created.\nUsername: " + username
-                            + "\nA one-time setup code was emailed to " + email.trim().toLowerCase(java.util.Locale.ROOT) + ".";
-                    if (mobile.ready()) {
-                        JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
-                                text + "\n\nMobile sign-in: ready. On the phone: TRIMAX app > Set up or reset password,"
-                                        + "\nthen the email address, the code and a new password.",
-                                "Account Created", JOptionPane.INFORMATION_MESSAGE);
-                    } else {
-                        JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
-                                text + "\n\nMobile sign-in: NOT created yet.\n" + mobile.describe()
-                                        + "\n\nOpen the account and press \"Create mobile sign-in\" to try again.",
-                                "Account Created - mobile sign-in pending", JOptionPane.WARNING_MESSAGE);
-                    }
+                    EmployeeOnboarding.Outcome outcome = get();
+                    EmployeeOnboarding.show(CreateEmployeeAccountDialog.this, outcome, true);
                     if (onCreated != null) onCreated.run();
                     dispose();
                 } catch (Exception ex) {

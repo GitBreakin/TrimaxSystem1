@@ -61,17 +61,17 @@ administrator disabled them). Then use your provider's SMTP relay settings inste
 ## What happens when an account is created
 
 1. An Admin opens **Agents & Drivers → Create Employee Account** and enters name, email, contact number
-   and role.
-2. TRIMAX creates a random initial password internally and stores only its hash.
-3. TRIMAX stores a one-time setup code (hashed, 24 hours, single use, 5 tries) and emails it.
-4. If email is not set up, or sending fails, the whole step is rolled back: no account and no code are
-   saved, and the message says what to fix.
-5. TRIMAX then creates the person's Supabase sign-in for the phone and links it (needs
-   `sql/20261026_01_employee_mobile_sign_in.sql` and the Edge Function `trimax-accounts`; see
-   `docs/MOBILE_INTEGRATION.md`). If that step fails, the account is kept and the message says so; open
-   the account and press **Create mobile sign-in**.
-6. On the phone: **Set up or reset password**, then the email, the code and a new password.
+   and role. (Email must be set up on that PC, otherwise nothing is saved.)
+2. TRIMAX saves the account, then creates the person's Supabase sign-in for the phone with a
+   **temporary password**: the first name and 4 random characters, for example `Kenjie-7Q4M`.
+3. The admin sees the temporary password once (with a Copy button), and it is emailed to the person.
+   If the email fails, the window says so; give the password to the person yourself.
+4. On the phone the person signs in with the email and the temporary password. The app then asks for
+   their own password before anything else.
+5. If the sign-in step fails (for example no internet), the account is kept and no password is sent;
+   open the account and press **Create mobile sign-in**.
 
-A new code later (expired, or a forgotten phone password): open the account → **Send new setup code**.
+The temporary password is never stored by TRIMAX. A forgotten phone password later: open the account →
+**Send new setup code**; on the phone: **Set up or reset password**.
 
 Never commit SMTP passwords, provider API keys or service-account credentials to Git.

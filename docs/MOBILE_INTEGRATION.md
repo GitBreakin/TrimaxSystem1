@@ -83,10 +83,11 @@ It does not delete, rename or rewrite any existing data, and does not touch PR #
    you create exist. Linking never trusts sign-up metadata, but closed sign-up keeps the user list clean.
 8. **Sign-ins for agents and drivers (no Dashboard step).** After `sql/20261026_01_employee_mobile_sign_in.sql`
    and the Edge Function `supabase/functions/trimax-accounts` are live (see the section below),
-   **Agents & Drivers → Create Employee Account** also creates the person's Supabase sign-in and links it.
-   For an account made earlier: open it → **Create mobile sign-in**. The person chooses the phone
-   password in the app (**Set up or reset password**) with the code from the TRIMAX email; a new code:
-   open the account → **Send new setup code**. Roles are never set in Supabase.
+   **Agents & Drivers → Create Employee Account** also creates the person's Supabase sign-in, links it
+   and gives it a temporary password (`Kenjie-7Q4M`: first name + 4 random characters), shown once to the
+   admin and emailed. The app asks for the person's own password at the first sign-in. For an account
+   made earlier: open it → **Create mobile sign-in**. A forgotten phone password: open the account →
+   **Send new setup code**, then **Set up or reset password** in the app. Roles are never set in Supabase.
 9. **Sign-ins made by hand before this** (Supabase → Authentication → Users): open the account →
    **Link mobile sign-in**. The link is made only if a confirmed Supabase user with exactly that email
    exists. **Remove mobile sign-in** revokes it; setting the account Inactive also blocks the app on its
@@ -101,11 +102,16 @@ Desktop (admin, JDBC)                     Supabase (server)                     
 Create Employee Account
   users row + setup code (hashed) + email
   issue_provisioning_ticket(admin, user) -> queue (provisioning_requests), one-time ticket
-  POST trimax-accounts {provision, ticket} -> claim ticket -> Auth Admin API: create user
-                                              (email confirmed, random password, app_metadata
+  POST trimax-accounts {provision, ticket, -> claim ticket -> Auth Admin API: create user
+        temporary_password}                   (email confirmed, the temporary password,
+                                              user_metadata.must_change_password, app_metadata
                                               trimax_provisioned/trimax_username)
                                            -> trimax_service_finish_provisioning: link
-                                                                                     Set up or reset password:
+  shows the temporary password once and emails it                                    sign in with it -> must
+                                                                                     choose own password
+                                                                                     (PUT /auth/v1/user)
+                                                                                     Forgot it later -> Set up
+                                                                                     or reset password:
                                            <- POST trimax-accounts {set_password, email, code, new password}
                                               trimax_service_use_setup_code (1 use, 5 tries, 24 h)
                                               -> Auth Admin API: set that user's password
