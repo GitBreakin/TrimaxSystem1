@@ -171,4 +171,20 @@ check "select count(*) = 0 from pg_proc where proname = 'trimax_driver_my_vehicl
 check "select count(*) > 0 from vehicles" "rollback kept the vehicles"
 psql_owner -f 20261027_03_driver_my_vehicle.sql
 check "select count(*) = 1 from pg_proc where proname = 'trimax_driver_my_vehicle'" "driver vehicle re-applies after rollback"
+echo "== Agent discounts per item (twice: re-runnable)"
+psql_owner -f 20261027_04_per_item_discounts.sql
+psql_owner -f 20261027_04_per_item_discounts.sql
+psql_su -d "$DB" -f tests/48_per_item_discounts_tests.sql > "/tmp/$DB.48.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PER-ITEM/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.48.log"
+grep -q '^ALL PER-ITEM DISCOUNT SQL TESTS PASSED' "/tmp/$DB.48.log" || { echo "FAIL per-item discount tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.48.log"
+echo "== Per-item discounts rollback, then re-apply"
+disc_lines="$(psql_owner -tAc "select count(*) from booking_items where discount_per_unit > 0")"
+psql_owner -f 20261027_90_rollback_per_item_discounts.sql
+check "select count(*) = 0 from pg_proc where proname in ('trimax_agent_set_item_discounts','apply_item_discounts','item_discount_max','refresh_booking_total_for')" "rollback removed the per-item functions"
+check "select pronargs = 10 from pg_proc where proname = 'save_product'" "rollback put back the 10-argument save_product"
+check "select count(*) = $disc_lines from booking_items where discount_per_unit > 0" "rollback kept the item discounts ($disc_lines lines)"
+psql_owner -f 20261027_04_per_item_discounts.sql
+check "select pronargs = 11 from pg_proc where proname = 'save_product'" "per-item discounts re-apply after rollback"
+check "select count(*) = 0 from bookings b where b.subtotal_amount is not null and b.total_amount <> b.subtotal_amount - b.discount_amount" "after re-apply every booking total = subtotal - discount"
 echo "ALL DATABASE TESTS PASSED"
