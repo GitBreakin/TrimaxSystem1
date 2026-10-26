@@ -137,21 +137,34 @@ final class CreateEmployeeAccountDialog extends JDialog {
         String contactNumber = contact;
         String role = (String) cmbRole.getSelectedItem();
         setBusy(true);
-        new SwingWorker<String, Void>() {
+        new SwingWorker<Object[], Void>() {
             @Override
-            protected String doInBackground() throws Exception {
-                return AccountService.createEmployee(fullName, email, contactNumber, role);
+            protected Object[] doInBackground() throws Exception {
+                String username = AccountService.createEmployee(fullName, email, contactNumber, role);
+                // The account is saved and the code is emailed; now its Supabase sign-in for the phone.
+                return new Object[]{username, MobileProvisioning.create(username)};
             }
 
             @Override
             protected void done() {
                 setBusy(false);
                 try {
-                    String username = get();
-                    JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
-                            "Employee account created.\nUsername: " + username
-                                    + "\nA one-time password setup code was emailed to the employee.",
-                            "Account Created", JOptionPane.INFORMATION_MESSAGE);
+                    Object[] r = get();
+                    String username = (String) r[0];
+                    MobileProvisioning.Result mobile = (MobileProvisioning.Result) r[1];
+                    String text = "Employee account created.\nUsername: " + username
+                            + "\nA one-time setup code was emailed to " + email.trim().toLowerCase(java.util.Locale.ROOT) + ".";
+                    if (mobile.ready()) {
+                        JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
+                                text + "\n\nMobile sign-in: ready. On the phone: TRIMAX app > Set up or reset password,"
+                                        + "\nthen the email address, the code and a new password.",
+                                "Account Created", JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
+                                text + "\n\nMobile sign-in: NOT created yet.\n" + mobile.describe()
+                                        + "\n\nOpen the account and press \"Create mobile sign-in\" to try again.",
+                                "Account Created - mobile sign-in pending", JOptionPane.WARNING_MESSAGE);
+                    }
                     if (onCreated != null) onCreated.run();
                     dispose();
                 } catch (Exception ex) {
@@ -166,7 +179,7 @@ final class CreateEmployeeAccountDialog extends JDialog {
 
     private void setBusy(boolean busy) {
         btnCreate.setEnabled(!busy);
-        btnCreate.setText(busy ? "Creating account..." : "Create employee account");
+        btnCreate.setText(busy ? "Creating account and sign-in..." : "Create employee account");
         setCursor(busy ? java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR)
                 : java.awt.Cursor.getDefaultCursor());
     }

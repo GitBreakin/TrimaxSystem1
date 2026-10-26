@@ -164,7 +164,8 @@ public class AccountDetailDialog extends JDialog {
                     ? "Not set up on this database (run sql/20261023_01_mobile_booking_integration.sql)"
                     : d.mobile.linked
                     ? "Can sign in as " + d.mobile.email + "  (linked " + Theme.formatWhen(d.mobile.linkedAt)
-                      + (d.mobile.linkedBy == null ? "" : " by " + d.mobile.linkedBy) + ")"
+                      + (d.mobile.linkedBy == null ? "" : "provisioning".equals(d.mobile.linkedBy)
+                              ? " automatically" : " by " + d.mobile.linkedBy) + ")"
                     : "Cannot sign in to the mobile app (no linked sign-in)");
         }
         return grid;
@@ -262,16 +263,14 @@ public class AccountDetailDialog extends JDialog {
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBorder(new EmptyBorder(12, 0, 0, 0));
 
-        JLabel hint = new JLabel("Passwords are never shown here. Password reset is not available from this screen yet.");
+        JLabel hint = new JLabel("Passwords are never shown here. Phone passwords are set with an emailed setup code.");
         hint.setFont(new Font("SansSerif", Font.PLAIN, 12));
         hint.setForeground(Theme.MUTED);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         p.add(hint);
         p.add(Box.createVerticalStrut(8));
 
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        row.setOpaque(false);
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel row = UiKit.flowRow();   // wraps onto a second line instead of hiding buttons
 
         AuthService.Session me = AuthService.current();
         boolean self = me != null && me.username.equals(d.username);
@@ -294,12 +293,26 @@ public class AccountDetailDialog extends JDialog {
             row.add(on);
         }
         if (!self && d.mobile != null && d.mobile.installed) {
+            boolean active = "Active".equals(d.status);
             if (d.mobile.linked) {
+                if (active) {
+                    JButton code = UiKit.secondaryButton("Send new setup code");
+                    code.setToolTipText("Emails a one-time code for choosing the phone password (24 hours)");
+                    code.addActionListener(e -> confirmAndSendSetupCode());
+                    row.add(code);
+                }
                 JButton unlink = UiKit.dangerButton("Remove mobile sign-in");
                 unlink.addActionListener(e -> confirmAndUnlinkMobile());
                 row.add(unlink);
             } else {
+                if (active) {
+                    JButton create = UiKit.primaryButton("Create mobile sign-in");
+                    create.setToolTipText("Creates the Supabase sign-in for this account and links it (no Dashboard needed)");
+                    create.addActionListener(e -> confirmAndCreateMobile());
+                    row.add(create);
+                }
                 JButton link = UiKit.secondaryButton("Link mobile sign-in");
+                link.setToolTipText("For a sign-in that already exists in Supabase");
                 link.addActionListener(e -> confirmAndLinkMobile());
                 row.add(link);
             }
@@ -325,12 +338,101 @@ public class AccountDetailDialog extends JDialog {
         }
         int choice = JOptionPane.showConfirmDialog(this,
                 "Let " + d.name + " (" + d.username + ") sign in to the TRIMAX mobile app as " + d.email + "?\n\n"
-                        + "Before this works, a Supabase sign-in with exactly this email must exist and be confirmed:\n"
-                        + "Supabase dashboard > Authentication > Users > Add user (or Invite).\n\n"
+                        + "Use this only for a Supabase sign-in that already exists (made by hand earlier); it must\n"
+                        + "have exactly this email and be confirmed. Otherwise use \"Create mobile sign-in\".\n\n"
                         + "The phone always uses the role and Active status of this TRIMAX account.",
                 "Link mobile sign-in", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (choice != JOptionPane.OK_OPTION) return;
         runMobileChange(true);
+    }
+
+    private void confirmAndCreateMobile() {
+        if (busy) return;
+        final AccountService.Detail d = detail;
+        if (d.email == null || d.email.isBlank()) {
+            JOptionPane.showMessageDialog(this, "This account has no email address. The mobile sign-in uses the email,\n"
+                    + "so add one to the account first.", "Create mobile sign-in", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Create the TRIMAX mobile app sign-in for " + d.name + " (" + d.username + ") with " + d.email + "?\n\n"
+                        + "TRIMAX creates it in Supabase and links it to this account. The person then chooses the\n"
+                        + "phone password with the emailed setup code (use \"Send new setup code\" if it expired).\n\n"
+                        + "The phone always uses the role and Active status of this TRIMAX account.",
+                "Create mobile sign-in", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        busy = true;
+        showMessage("Creating mobile sign-in...", false);
+        new SwingWorker<MobileProvisioning.Result, Void>() {
+            @Override
+            protected MobileProvisioning.Result doInBackground() {
+                return MobileProvisioning.create(d.username);
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                MobileProvisioning.Result r;
+                try {
+                    r = get();
+                } catch (Exception ex) {
+                    r = null;
+                }
+                if (AuthService.current() == null) {   // admin access was withdrawn meanwhile
+                    dispose();
+                    AuthFrame.logout(owner);
+                    return;
+                }
+                if (r != null && r.ready()) {
+                    notice = r.describe();
+                    if (onChanged != null) onChanged.run();
+                } else {
+                    notice = null;
+                    JOptionPane.showMessageDialog(AccountDetailDialog.this,
+                            "The mobile sign-in was not created.\n" + (r == null ? "Unexpected error." : r.describe()),
+                            "Create mobile sign-in", JOptionPane.WARNING_MESSAGE);
+                }
+                load();
+            }
+        }.execute();
+    }
+
+    private void confirmAndSendSetupCode() {
+        if (busy) return;
+        final AccountService.Detail d = detail;
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Email a new one-time setup code to " + d.email + "?\n\n"
+                        + "Older codes stop working. " + d.name + " enters it in the TRIMAX app\n"
+                        + "(Set up or reset password) to choose a new phone password. It works for 24 hours.",
+                "Send new setup code", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        busy = true;
+        showMessage("Sending the setup code...", false);
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return AuthService.sendNewSetupCode(d.username);
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                try {
+                    notice = "New setup code emailed to " + get() + ".";
+                } catch (Exception ex) {
+                    Throwable cause = ex instanceof ExecutionException && ex.getCause() != null ? ex.getCause() : ex;
+                    notice = null;
+                    if (AuthService.current() == null) {
+                        dispose();
+                        AuthFrame.logout(owner);
+                        return;
+                    }
+                    JOptionPane.showMessageDialog(AccountDetailDialog.this, "No code was sent.\n" + cause.getMessage(),
+                            "Send new setup code", JOptionPane.ERROR_MESSAGE);
+                }
+                load();
+            }
+        }.execute();
     }
 
     private void confirmAndUnlinkMobile() {

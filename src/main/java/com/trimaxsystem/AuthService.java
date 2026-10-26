@@ -33,6 +33,7 @@ public final class AuthService {
     private static final int    LOCK_MINUTES        = 15;
     private static final int    REMEMBER_DAYS       = 30;
     private static final int    RESET_MINUTES       = 15;    // how long a reset code works
+    private static final int    SETUP_MINUTES       = 24 * 60; // how long an employee setup code works (phone)
     private static final int    MAX_RESET_ATTEMPTS  = 5;
     private static final String CODE_CHARS          = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
     private static final int    CODE_LENGTH         = 8;
@@ -336,8 +337,59 @@ public final class AuthService {
      */
     static void createEmployeeSetupCode(Connection conn, String username, String email, String fullName)
             throws SQLException, AuthException {
+        issueSetupCode(conn, username, email, fullName, true);
+    }
+
+    /**
+     * Admin: emails a NEW one-time setup code to an Active Agent or Driver, e.g. when the first one
+     * expired or the person forgot the phone password. Older codes stop working. Nothing else changes.
+     *
+     * @return the email address the code was sent to
+     */
+    public static String sendNewSetupCode(String username) throws AuthException {
+        requireAdmin();
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            String email, name, role, status;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT u.email, u.name, r.role_name, u.account_status FROM users u "
+                            + "LEFT JOIN roles r ON r.role_id = u.role_id WHERE u.username = ?")) {
+                ps.setString(1, username);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) throw new AuthException("The account no longer exists.");
+                    email = rs.getString(1);
+                    name = rs.getString(2);
+                    role = rs.getString(3);
+                    status = rs.getString(4);
+                }
+            }
+            if (!"Agent".equals(role) && !"Driver".equals(role) && !"Rider".equals(role)) {
+                throw new AuthException("Setup codes are for Agent and Driver accounts.");
+            }
+            if (!"Active".equals(status)) throw new AuthException("The account is not Active.");
+            if (email == null || email.isBlank()) throw new AuthException("The account has no email address.");
+            conn.setAutoCommit(false);
+            try {
+                issueSetupCode(conn, username, email.trim(), name, false);
+                AuditService.record(conn, "account.setup_code_sent", "user", username, "success",
+                        "New setup code emailed to " + email.trim());
+                conn.commit();
+            } catch (SQLException | AuthException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+            return email.trim();
+        } catch (SQLException e) {
+            throw db(e);
+        }
+    }
+
+    private static void issueSetupCode(Connection conn, String username, String email, String fullName,
+                                       boolean newAccount) throws SQLException, AuthException {
         if (!EmailService.isConfigured()) {
-            throw new AuthException(EmailService.notSetUpMessage("the new employee cannot be sent a setup code")
+            throw new AuthException(EmailService.notSetUpMessage(newAccount
+                    ? "the new employee cannot be sent a setup code" : "the setup code cannot be sent")
                     + "\nNothing was saved.");
         }
 
@@ -355,7 +407,7 @@ public final class AuthService {
                         + "VALUES (?, ?, now() + make_interval(mins => ?))")) {
             ps.setString(1, username);
             ps.setString(2, sha256Hex(code.toString()));
-            ps.setInt(3, RESET_MINUTES);
+            ps.setInt(3, SETUP_MINUTES);
             ps.executeUpdate();
         }
 
@@ -364,7 +416,8 @@ public final class AuthService {
         } catch (Exception e) {
             String reason = EmailService.explain(e);
             System.err.println("Failed to send employee setup email: " + e.getClass().getSimpleName() + ": " + reason);
-            throw new AuthException("The setup email could not be sent, so the account was not created.\n" + reason
+            throw new AuthException((newAccount ? "The setup email could not be sent, so the account was not created.\n"
+                    : "The setup email could not be sent; the old code still works if it has not expired.\n") + reason
                     + "\nYou can check the email settings with System Settings > Email > Send test email.", e);
         }
     }
