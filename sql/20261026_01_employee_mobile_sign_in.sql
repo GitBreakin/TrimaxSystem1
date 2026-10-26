@@ -31,7 +31,9 @@
 -- ORDER: after 20261025_01 (provisioning queue) and 20261023_01 (mobile_accounts). Re-runnable.
 -- Creates 1 table and 4 functions, and fixes the audit actor in public.trimax_service_finish_provisioning
 -- (see part 5). Changes no existing rows.
--- NOT APPLIED to production. Rollback: 20261026_94_rollback_employee_mobile_sign_in.sql.
+-- APPLIED to production on 2026-10-26 13:49 (Asia/Manila) with the owner's approval (migration
+-- 20261026_01_employee_mobile_sign_in, this file at 3adfd00); Edge Function trimax-accounts v1 deployed the
+-- same minute (verify_jwt = false). Rollback: 20261026_94_rollback_employee_mobile_sign_in.sql.
 -- =====================================================================================================
 
 begin;

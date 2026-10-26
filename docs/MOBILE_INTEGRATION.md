@@ -123,7 +123,7 @@ Create Employee Account
 * The same migration fixes the audit actor of the existing `trimax_service_finish_provisioning` (it wrote
   `provisioning`, which `audit_log`'s foreign key refuses, so it could never have succeeded).
 
-Install (each step needs the owner's approval): run `sql/20261026_01_employee_mobile_sign_in.sql`, then
+Installed on production 2026-10-26 (with approval). To install elsewhere: run `sql/20261026_01_employee_mobile_sign_in.sql`, then
 deploy `supabase/functions/trimax-accounts` (`index.ts` + `handler.ts`) with **verify_jwt = false** (the
 ticket or the code is the authorization). No secret has to be added. Rollback:
 `sql/20261026_94_rollback_employee_mobile_sign_in.sql` (keeps every sign-in and link), and delete the
