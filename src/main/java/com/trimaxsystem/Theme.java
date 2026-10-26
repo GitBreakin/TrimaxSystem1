@@ -38,12 +38,49 @@ public final class Theme {
     public static final Color WARN        = Color.decode("#D97706");
     public static final Color DANGER      = Color.decode("#DC2626");
 
-    // Fonts
-    public static final Font TITLE   = new Font("SansSerif", Font.BOLD, 24);
-    public static final Font SUBTLE  = new Font("SansSerif", Font.PLAIN, 13);
-    public static final Font NAV     = new Font("SansSerif", Font.PLAIN, 14);
-    public static final Font NAV_ON  = new Font("SansSerif", Font.BOLD, 14);
-    public static final Font BRAND   = new Font("SansSerif", Font.BOLD, 22);
+    // Tables, fields and states (redesign)
+    public static final Color HEADER_BG    = Color.decode("#F8FAFC");   // table header
+    public static final Color ROW_LINE     = Color.decode("#EEF2F7");   // line between table rows
+    public static final Color SELECTION    = Color.decode("#EAF2FF");   // selected row
+    public static final Color FIELD_BORDER = Color.decode("#CBD5E1");
+    public static final Color PLACEHOLDER  = Color.decode("#94A3B8");
+    public static final Color SUBTLE_BG    = Color.decode("#F1F5F9");   // neutral chip / empty picture
+
+    // Fonts: Segoe UI on Windows (Inter where installed), else the Java default sans-serif.
+    public static final String FAMILY = pickFamily("Segoe UI", "Inter");
+    public static final Font TITLE   = font(Font.BOLD, 24);
+    public static final Font SUBTLE  = font(Font.PLAIN, 13);
+    public static final Font NAV     = font(Font.PLAIN, 14);
+    public static final Font NAV_ON  = font(Font.BOLD, 14);
+    public static final Font BRAND   = font(Font.BOLD, 22);
+    public static final Font SECTION = font(Font.BOLD, 15);   // card titles
+    public static final Font SMALL   = font(Font.PLAIN, 12);
+    public static final Font LABEL   = font(Font.BOLD, 12);   // captions above fields, table headers
+
+    /** The app font in a style and size. */
+    public static Font font(int style, int size) {
+        return new Font(FAMILY, style, size);
+    }
+
+    private static String pickFamily(String... preferred) {
+        try {
+            java.util.Set<String> installed = new java.util.HashSet<>(java.util.Arrays.asList(
+                    java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+            for (String f : preferred) if (installed.contains(f)) return f;
+        } catch (Throwable ignored) {
+            // headless or no font list: fall through
+        }
+        return "SansSerif";
+    }
+
+    /** Background tint for a status chip: the status colour at low strength on white. */
+    public static Color tint(Color c) {
+        return new Color(mix(c.getRed()), mix(c.getGreen()), mix(c.getBlue()));
+    }
+
+    private static int mix(int v) {
+        return 255 - Math.round((255 - v) * 0.13f);
+    }
 
     /** Colour for a canonical booking status value, as stored in bookings.status. */
     public static Color statusColor(String status) {

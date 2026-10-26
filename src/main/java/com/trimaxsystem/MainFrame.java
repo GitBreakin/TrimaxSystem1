@@ -442,6 +442,7 @@ public class MainFrame extends JFrame {
     }
 
     public static void main(String[] args) {
+        SwingUtilities.invokeLater(Laf::install);
         try {
             ExportDirectories.initialize();
         } catch (java.io.IOException e) {
