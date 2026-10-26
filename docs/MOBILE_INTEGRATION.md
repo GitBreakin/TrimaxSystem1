@@ -208,7 +208,7 @@ desktop works before, during and after either part.
   server, is recommended before handing the desktop to more people.
 
 
-## Driver: assigned vehicle (`20261027_03`, not applied yet)
+## Driver: assigned vehicle (`20261027_03`, live since 2026-10-27 04:05)
 
 `public.trimax_driver_my_vehicle()` returns `{"vehicles":[{"plate_number","vehicle_type","status"}],"checked_at"}`
 for the signed-in driver only (the driver comes from the sign-in; there is no parameter). The Driver

@@ -16,7 +16,11 @@
 --     another driver's vehicle. Agents get TM403.
 --
 -- ORDER: after 20261026_01. Re-runnable. Rollback: 20261027_91_rollback_driver_my_vehicle.sql.
--- NOT applied to production yet.
+-- APPLIED to production on 2026-10-27 (about 04:05 Asia/Manila) with the owner's approval, as migration
+-- 20261027_03_driver_my_vehicle. Before: production equalled the repository rebuild through 20261027_02
+-- (108/108 fingerprints); a dry run on a copy of production's rows changed no row. After: 108/108
+-- fingerprints equal the rebuild through this file. Rows that changed meanwhile came from the team using
+-- the apps (audit log: deliveries, a customer, a product, an expense), not from this function, which only reads.
 -- =====================================================================================================
 
 begin;

@@ -14,7 +14,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
 | `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
 | `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
-| `20261027_03` Driver app: own assigned vehicle (`trimax_driver_my_vehicle`) | **Not applied.** Needs approval |
+| `20261027_03` Driver app: own assigned vehicle (`trimax_driver_my_vehicle`) | **Applied 2026-10-27** (about 04:05) with approval |
 
 ## Files (run in this order)
 
