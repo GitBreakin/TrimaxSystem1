@@ -92,11 +92,13 @@ public class AccountsPanel extends JPanel {
         row1.add(btnApply);
         row1.add(btnClear);
         row1.add(btnRefresh);
-        row1.add(btnCreateEmployee);
 
         lblActive.setFont(Theme.SUBTLE);
         lblActive.setForeground(Theme.BLUE_DARK);
+        // On its own row: at the end of row 1 it wrapped out of sight on common screen widths
+        // (a FlowLayout row in a BoxLayout only gets the height of one line).
         JPanel row2 = UiKit.flowRow();
+        row2.add(btnCreateEmployee);
         row2.add(lblActive);
 
         JPanel card = new JPanel();

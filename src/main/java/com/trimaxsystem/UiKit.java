@@ -2,6 +2,8 @@ package com.trimaxsystem;
 
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
@@ -56,10 +58,77 @@ public final class UiKit {
 
     /** A transparent left-aligned row for filter controls. */
     public static JPanel flowRow() {
-        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        JPanel p = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 4));
         p.setOpaque(false);
         p.setAlignmentX(Component.LEFT_ALIGNMENT);
         return p;
+    }
+
+    /**
+     * A FlowLayout whose preferred height includes the lines it wraps onto. A plain FlowLayout reports the
+     * height of ONE line, so in a BoxLayout the controls that wrap on a narrower window were cut off and
+     * could not be reached (e.g. "Create Employee Account" on Agents & Drivers at 1280-1920 px wide).
+     */
+    static final class WrapLayout extends FlowLayout {
+        WrapLayout(int align, int hgap, int vgap) {
+            super(align, hgap, vgap);
+        }
+
+        @Override
+        public Dimension preferredLayoutSize(Container target) {
+            return size(target, true);
+        }
+
+        @Override
+        public Dimension minimumLayoutSize(Container target) {
+            Dimension d = size(target, false);
+            d.width -= getHgap() + 1;
+            return d;
+        }
+
+        @Override
+        public void layoutContainer(Container target) {
+            super.layoutContainer(target);
+            // The height needed depends on the width just given; ask the parent again if it changed.
+            int needed = size(target, true).height;
+            if (target.getHeight() > 0 && needed != target.getHeight()) {
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    if (size(target, true).height != target.getHeight()) {
+                        target.invalidate();
+                        Container top = target.getParent() != null ? target.getParent() : target;
+                        top.revalidate();
+                        top.repaint();
+                    }
+                });
+            }
+        }
+
+        private Dimension size(Container target, boolean preferred) {
+            synchronized (target.getTreeLock()) {
+                Container c = target;
+                while (c.getWidth() == 0 && c.getParent() != null) c = c.getParent();
+                int width = c.getWidth() > 0 ? c.getWidth() : Integer.MAX_VALUE;
+                Insets in = target.getInsets();
+                int max = width - (in.left + in.right + getHgap() * 2);
+                int lineWidth = 0, lineHeight = 0, totalWidth = 0, totalHeight = 0;
+                for (Component m : target.getComponents()) {
+                    if (!m.isVisible()) continue;
+                    Dimension d = preferred ? m.getPreferredSize() : m.getMinimumSize();
+                    if (lineWidth > 0 && lineWidth + getHgap() + d.width > max) {
+                        totalWidth = Math.max(totalWidth, lineWidth);
+                        totalHeight += lineHeight + getVgap();
+                        lineWidth = 0;
+                        lineHeight = 0;
+                    }
+                    lineWidth += (lineWidth > 0 ? getHgap() : 0) + d.width;
+                    lineHeight = Math.max(lineHeight, d.height);
+                }
+                totalWidth = Math.max(totalWidth, lineWidth);
+                totalHeight += lineHeight;
+                return new Dimension(totalWidth + in.left + in.right + getHgap() * 2,
+                        totalHeight + in.top + in.bottom + getVgap() * 2);
+            }
+        }
     }
 
     public static void styleField(JTextField f) {

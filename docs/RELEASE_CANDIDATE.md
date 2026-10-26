@@ -20,6 +20,7 @@ creates accounts, sends staff emails or changes the live database. The same file
 | P1-1 | Security | 7 live accounts (1 Admin, 2 Agents, 3 active Drivers, 1 inactive Driver) still store their password as plain text; each is only hashed when that person signs in. | RC adds **Settings → Password storage → Secure them now** (PBKDF2, same passwords, audited, skips accounts changed meanwhile). Run once after installing the RC. | Code ready; run needs approval |
 | P1-2 | Security | Supabase Auth "leaked password protection" is off (advisor WARN). | Supabase dashboard → Authentication → password security. May need a paid plan. | Lance |
 | P2-1 | Merge | Android `master` `1747cab` and the RC's `cf09946`/`ab62a61` set different liquid-glass opacity. A plain merge mixed them. | RC keeps the later "crystal clear" values (the RC tree equals `feature/stage-g-reports`). | Check on a phone |
+| P2-3 | Usability | Agents & Drivers: the **Create Employee Account** button wrapped out of sight on common screen widths (found by Lance, 2026-10-26). | Fixed in the RC: the button has its own row, and toolbar rows now grow when their controls wrap (all 5 pages that use them; checked at 1280, 1536 and 1920 px and after resizing). | Fixed |
 | P2-2 | Exposure | Both repositories are public. The Android app's Supabase key is a publishable key (meant to be public); that is fine. | Owner decision on visibility. | Owner |
 | P3-1 | Performance | Advisor INFO: 3 foreign keys without an index, 4 unused indexes. | Leave until there is real traffic. | Later |
 
