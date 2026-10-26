@@ -12,6 +12,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Applied and deployed 2026-10-26**, with the owner's approval |
 | `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
+| `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Not applied.** Needs approval (see [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md)) |
 
 ## Files (run in this order)
 
@@ -25,6 +26,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `sql/20261025_05_admin_media_tickets.sql` | Desktop photo viewing without any storage key on the PC: `trimax_private.media_tickets`, `trimax_private.issue_media_ticket(admin, bucket, path)` (owner only: Active Admin, photo must exist, audited as `media.view`) and `public.trimax_service_redeem_media_ticket(ticket)` (service role only, one use, 2 minutes). Used with the Edge Function in `supabase/functions/trimax-admin-media` | Additive: 1 private table, 2 functions |
 | `sql/20261025_06_product_images.sql` | Stage F. `products.image_path` (+ `image_updated_at`), PUBLIC bucket `product-images` (JPEG, 2 MB, no write policies: only the Edge Function writes), upload/delete tickets (`trimax_private.issue_product_image_ticket`), `trimax_private.set_product_image` (audited, returns the old picture to delete), redeem returns the ticket's action, `trimax_list_products` adds `image_path` | Additive: 2 nullable columns, 1 bucket, 2 new + 2 replaced functions |
 | `sql/20261026_01_employee_mobile_sign_in.sql` | Agent/Driver Supabase sign-ins without the Dashboard. `trimax_private.provisioning_tickets`; `trimax_private.issue_provisioning_ticket(admin, username)` (owner only: Active Admin; queues with the existing `request_mobile_access`); `public.trimax_service_claim_provisioning_ticket(ticket)` and `public.trimax_service_use_setup_code(email, code)` (service role only); private helper `claim_provisioning_request`. Replaces `trimax_service_finish_provisioning` with the same logic but a valid audit actor (the old one audited as `provisioning`, which `audit_log_actor_username_fkey` refuses). Used with `supabase/functions/trimax-accounts` | Additive: 1 private table, 4 new functions, 1 fixed function, no data |
+| `sql/20261027_01_sales_inventory_payroll.sql` | Products: puhunan, patong (amount or percent), minimum patong, price kept consistent by a trigger. `public.inventory_movements` (append-only stock history, written by a trigger on `products.stock` with the reason of each change). Bookings: completion time, cost snapshot per line (`booking_items.unit_cost`), agent discount columns and checks (minimum price = puhunan + minimum patong). `public.sales` / `sale_items` (Walk-In / In-House, receipt numbers, void with stock return). `public.payroll_records`. Owner-only Desktop functions (`save_product`, `restock_product`, `adjust_stock`, `create_sale`, `void_sale`, `set_sale_paid`, `save_payroll`, `void_payroll`, `profit_summary`, `profit_trend`). Phone: private `customer-photos` bucket (own-folder policies), `trimax_agent_save_customer`, `_list_customers`, `_discount_quote`, `_set_discount`, and `trimax_agent_create_booking` with an optional discount (a new customer must be saved with a photo first). `issue_media_ticket` accepts customer photos. RLS on every new table, no API grants | Additive: 4 tables, 1 sequence, 1 bucket, columns on `products`, `bookings`, `booking_items`, `clients`; replaces 4 functions; no data rewritten |
+| `sql/20261027_93_rollback_sales_inventory_payroll.sql` | Undoes `20261027_01`'s behaviour: puts back the previous `trimax_agent_create_booking`, `booking_json`, booking-total trigger, `issue_media_ticket` and media-ticket checks; drops the new functions, triggers and policies; keeps every new table, column and row | — |
 | `sql/20261026_94_rollback_employee_mobile_sign_in.sql` | Undoes `20261026_01`: drops the tickets and the 4 functions and puts back the previous finish function; keeps every sign-in and link | — |
 | `sql/20261025_96_rollback_product_images.sql` | Undoes `_06` (part A keeps pictures and paths; part B, commented, drops the columns) | — |
 | `sql/20261025_97_rollback_media_tickets.sql` | Undoes `_05` (tickets are short-lived; audit rows stay) | — |
@@ -124,6 +127,17 @@ The live upload check (a real picture through the function) is done from the Des
 
 Tests: `sql/tests/42_product_images_tests.sql` (26 checks + rollback/re-apply) and the Edge Function tests
 (21 checks, including upload and delete).
+
+### `20261027_01` (sales, stock, payroll, customer photos, discounts): not applied
+
+Waiting for approval. Order: back up → apply `20261027_01` → redeploy `trimax-admin-media` (adds
+`customer-photos` to the buckets the Admin may view) → install the Desktop build → give Agents the new
+APK the same day (an older APK cannot add a new customer once the photo is required). Details, rules and
+rollback: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
+
+Tests: `sql/tests/45_sales_inventory_payroll_tests.sql` in `run_tests.sh` (full suite: 472 checks, ALL
+DATABASE TESTS PASSED on 2026-10-26, including rollback and re-apply) and the Edge Function tests (22
+checks, with a customer-photo case).
 
 ## Rebuilding a database from this repository (checked 2026-10-26)
 

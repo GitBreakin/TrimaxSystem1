@@ -169,6 +169,23 @@ Use test accounts: one Agent (or Rider), two Drivers each with an `Available` ve
     `/rest/v1/bookings` must return an error, not rows; `POST /rest/v1/rpc/trimax_driver_list_deliveries`
     without a user token must be refused.
 
+## Customer photos and agent discounts (`20261027_01`, not applied yet)
+
+Needs approval; full rules in [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
+
+| Phone call | What the server does |
+| --- | --- |
+| Upload `customer-photos/<auth uid>/customer_<millis>_<8 chars>.jpg` | Private bucket, JPEG up to 5 MB; an Agent can write and read only their own folder |
+| `trimax_agent_save_customer(name, contact, address, lat, lng, photo_path)` | New customer: photo required (`TM422`, detail `customer_photo_required`) and checked to be really uploaded (`customer_photo_missing`). Existing customer of this Agent: details updated, photo optional. Another Agent's customer: refused (`TM409`) |
+| `trimax_agent_list_customers()` | This Agent's customers with `photo_path` (null for older customers) |
+| `trimax_agent_discount_quote(items)` | Subtotal and the **maximum** discount (never the puhunan), or why none is possible |
+| `trimax_agent_create_booking(..., p_discount_type, p_discount_value)` | Unknown customer → `customer_photo_required`. Discount checked against the minimum price (`discount_too_big`, `discount_not_configured`); original, discount, type, value, Agent and time recorded |
+| `trimax_agent_set_discount(booking_id, type, value)` | Change or remove (0) the discount while the booking is Pending |
+
+The Admin opens customer photos from Customers on the Desktop through the Edge Function
+`trimax-admin-media` (redeploy with this update). **Release the new APK together with the update**: an
+older APK cannot add a new customer once the photo is required (bookings for existing customers still work).
+
 ## Rollback
 
 `sql/20261023_99_rollback_mobile_booking_integration.sql`, part A: drops the functions, triggers and
