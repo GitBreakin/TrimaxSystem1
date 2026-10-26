@@ -19,7 +19,11 @@
 --   4. privileges: new tables invisible to the API roles; new functions owner only
 --
 -- ORDER: after 20261027_01. Re-runnable. Rollback: 20261027_92_rollback_expenses.sql.
--- NOT applied to production yet.
+-- APPLIED to production on 2026-10-27 (about 03:36 Asia/Manila) with the owner's approval, as migration
+-- 20261027_02_expenses (one transaction). Before: dry run on a copy of production's rows (passwords and
+-- contact details masked) changed no value. After: production's schema equals a database built from the
+-- repository through this file (108/108 fingerprints), all 24 existing tables have the same row checksums,
+-- and the report columns of 20261027_01 give the same results.
 -- =====================================================================================================
 
 begin;

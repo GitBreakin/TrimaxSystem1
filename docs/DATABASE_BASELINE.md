@@ -13,7 +13,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
 | `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
-| `20261027_02` other expenses in net profit | **Not applied.** Needs approval (fingerprint compare + dry run first) |
+| `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
 
 ## Files (run in this order)
 
@@ -145,11 +145,15 @@ Tests: `sql/tests/45_sales_inventory_payroll_tests.sql` in `run_tests.sh` (full 
 DATABASE TESTS PASSED on 2026-10-26, including rollback and re-apply) and the Edge Function tests (22
 checks, with a customer-photo case).
 
-### `20261027_02` (other expenses in net profit): not applied
+### `20261027_02` (other expenses in net profit): applied 2026-10-27
 
-Before applying (approval first): compare production with a database rebuilt through `20261027_01`
-(fingerprints), dry run `20261027_02` on a copy of production's rows, back up, apply, then check the
-fingerprints again and that no existing value changed. Details: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
+Applied with the owner's approval (about 03:36 Manila, one transaction). Before: production equalled the
+repository rebuild through `20261027_01` (100/100 fingerprints); a dry run on a copy of production's rows
+(passwords and contact details masked) changed no row and gave the same report results. After: 108/108
+fingerprints equal the rebuild through `20261027_02`; the row checksums of all 24 existing tables and the
+`20261027_01` report columns (4 periods + 2 trends) are unchanged. Security advisors: no new warning (the
+two new tables show the same "RLS on, no policy" INFO as every TRIMAX table). No full data dump was taken
+(the update changes no row); undo with `20261027_92`. Details: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
 
 Tests: `sql/tests/46_expenses_tests.sql` in `run_tests.sh` (50 checks + rollback and re-apply; ALL DATABASE
 TESTS PASSED 2026-10-27). Also checked: after `20261027_02` + `20261027_92` the two report functions have

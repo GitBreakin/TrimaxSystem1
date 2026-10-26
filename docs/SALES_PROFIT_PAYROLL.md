@@ -141,7 +141,10 @@ Owner's request of 2026-10-27: business costs that are not payroll and not stock
   expense is disabled. An older Desktop on a server that has it keeps working; its Sales & Profit shows the
   lower net profit but no expense line, so install the new Desktop the same day.
 
-Rollout (after approval): compare production with the repository rebuild (fingerprints) → dry run on a copy
+**Production status: applied on 2026-10-27 (about 03:36 Manila) with the owner's approval** (108/108
+fingerprints after; no existing row or report value changed). Install the new Desktop build the same day.
+
+Rollout that was followed: compare production with the repository rebuild (fingerprints) → dry run on a copy
 of production's rows → back up → apply `sql/20261027_02_expenses.sql` (one transaction, re-runnable) →
 install the Desktop build. No Edge Function and no APK change.
 
