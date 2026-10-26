@@ -158,4 +158,17 @@ check "select count(*) = 2 from pg_proc where proname in ('save_expense','void_e
 check "select count(*) = $exp_rows from expenses" "re-apply continues from the same expenses"
 check "select other_expenses > 0 and net_profit = gross_profit - payroll_paid - payroll_unpaid - other_expenses from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after re-apply the report counts the expenses again"
 rm -f "/tmp/$DB.46.log"
+echo "== Driver app: own assigned vehicle (twice: re-runnable)"
+psql_owner -f 20261027_03_driver_my_vehicle.sql
+psql_owner -f 20261027_03_driver_my_vehicle.sql
+psql_su -d "$DB" -f tests/47_driver_vehicle_tests.sql > "/tmp/$DB.47.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL DRIVER VEHICLE/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.47.log"
+grep -q '^ALL DRIVER VEHICLE SQL TESTS PASSED' "/tmp/$DB.47.log" || { echo "FAIL driver vehicle tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.47.log"
+echo "== Driver vehicle rollback, then re-apply"
+psql_owner -f 20261027_91_rollback_driver_my_vehicle.sql
+check "select count(*) = 0 from pg_proc where proname = 'trimax_driver_my_vehicle'" "rollback removed trimax_driver_my_vehicle"
+check "select count(*) > 0 from vehicles" "rollback kept the vehicles"
+psql_owner -f 20261027_03_driver_my_vehicle.sql
+check "select count(*) = 1 from pg_proc where proname = 'trimax_driver_my_vehicle'" "driver vehicle re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"
