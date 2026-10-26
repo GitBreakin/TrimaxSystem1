@@ -16,6 +16,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 
 | File | What it does | Changes production? |
 | --- | --- | --- |
+| `sql/20261026_00_legacy_tables_from_production.sql` | The 11 Desktop tables (`users`, `bookings`, `clients`, …) exactly as production has them, written from production's catalog on 2026-10-26. Run it **first** when building a database from scratch, before `20261023_01`. | No: on production every statement is a no-op |
 | `sql/20261025_01_live_baseline.sql` | Everything production runs that was in no repo file: `user_locations`, `admin_notifications`, `trimax_private.duty_events`, `trimax_private.provisioning_requests`, GPS columns on `agents`/`vehicles`, 17 functions (GPS, duty with photo, mobile account provisioning, newer `trimax_driver_update_delivery_status` and `delivery_transition_allowed`), legacy booking-total and audit-log triggers, grants, the private `duty-photos` bucket and its 2 policies | No: on production every statement is a no-op |
 | `sql/20261025_02_search_path_and_trigger_privileges.sql` | Pins `search_path` on the 4 functions the Supabase advisor flags; API roles can no longer call the 2 trigger functions | Settings only, no data |
 | `sql/20261025_03_mobile_issue_reports.sql` | `public.trimax_report_issue(...)`: SOS and problem reports from the app become rows in `admin_notifications`, which the desktop Notifications screen already lists. Adds 2 nullable columns + 2 indexes | Additive, no data |
@@ -120,3 +121,18 @@ The live upload check (a real picture through the function) is done from the Des
 
 Tests: `sql/tests/42_product_images_tests.sql` (26 checks + rollback/re-apply) and the Edge Function tests
 (21 checks, including upload and delete).
+
+## Rebuilding a database from this repository (checked 2026-10-26)
+
+`sql/tests/rebuild_check.sh` builds a disposable database from the SQL files only, in this order:
+1. `20261026_00`
+2. `20261023_01`, `20261023_02`
+3. `20261025_01` to `_06`
+
+It then compares the result with production's schema fingerprints (`sql/tests/fingerprints.sql`, saved in `sql/tests/production_fingerprints_2026-10-26.txt`). The 80 fingerprints match. They cover:
+- every column, constraint, index, RLS flag and API grant of the 19 tables;
+- all 39 functions with their grants;
+- the 4 triggers, the 4 storage policies and the 3 buckets.
+
+To check production again later, run `sql/tests/fingerprints.sql` in the Supabase SQL editor (read-only), save the output and pass that file to the script.
+

@@ -69,7 +69,7 @@ It was then compared object by object with production:
 | Columns, constraints and indexes of every table the migrations create (`admin_notifications`, `user_locations`, `delivery_proofs`, all `trimax_private` tables) | **identical** |
 | Buckets `duty-photos`, `delivery-proofs` and the 4 storage policies | **identical** |
 | RLS flags and table grants (19 tables) | **identical** |
-| Legacy Desktop tables (`users`, `bookings`, `clients`, …) | differ from the **test reconstruction** only (`sql/tests/01_…`). They are not created by any migration. A schema-only dump of production would make a full rebuild exact (recommended, Lance's PC). |
+| Legacy Desktop tables (`users`, `bookings`, `clients`, …) | now in `sql/20261026_00_legacy_tables_from_production.sql` (written from production's catalog). A database built only from the repository files is **identical** to production: 80/80 schema fingerprints (`sql/tests/rebuild_check.sh`). |
 | Edge Function `trimax-admin-media` | v1 matched repo `5db009c`; **v2 deployed 2026-10-26** = repo `handler.ts` (sha256 identical) |
 | Applied migrations on live | `_02`, `_03`, `_04`, `_05`, and `_06` (2026-10-26, with approval). `_07` is **not applied**. |
 
