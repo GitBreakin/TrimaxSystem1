@@ -28,6 +28,9 @@ public class SettingsPanel extends JPanel {
     private final JLabel mapStatus = value("Not checked yet");
     private final JButton checkDb = UiKit.primaryButton("Check database now");
     private final JButton checkMap = UiKit.secondaryButton("Test map tile server");
+    private final JLabel pwStatus = value("Not checked yet");
+    private final JButton checkPw = UiKit.secondaryButton("Check password storage");
+    private final JButton securePw = UiKit.primaryButton("Secure them now");
 
     public SettingsPanel() {
         super(new BorderLayout());
@@ -63,6 +66,26 @@ public class SettingsPanel extends JPanel {
         checkDb.setAlignmentX(Component.LEFT_ALIGNMENT);
         db.add(checkDb);
         col.add(db);
+
+        JPanel pw = section("Password storage");
+        row(pw, "Stored without hashing", pwStatus);
+        JLabel pwNote = new JLabel("<html><div style='width:420px'>Accounts from before hashing existed keep their password as plain text until the person "
+                + "signs in again. \"Secure them now\" stores those passwords as PBKDF2 hashes; nobody's password changes.</div></html>");
+        pwNote.setForeground(Theme.MUTED);
+        pwNote.setFont(Theme.SUBTLE);
+        pwNote.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pw.add(pwNote);
+        JPanel pwButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 6));
+        pwButtons.setOpaque(false);
+        pwButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pwButtons.add(checkPw);
+        pwButtons.add(Box.createHorizontalStrut(8));
+        pwButtons.add(securePw);
+        pw.add(pwButtons);
+        securePw.setEnabled(false);
+        checkPw.addActionListener(e -> checkPasswords());
+        securePw.addActionListener(e -> securePasswords());
+        col.add(pw);
 
         JPanel map = section("Map provider");
         row(map, "Provider", "OpenStreetMap public tile server (no API key is used or stored)");
@@ -140,6 +163,66 @@ public class SettingsPanel extends JPanel {
                     dbStatus.setText("FAILED: " + (c.getMessage() == null ? c.toString() : firstLine(c.getMessage())));
                     dbLatency.setText("-");
                 }
+            }
+        }.execute();
+    }
+
+    private void checkPasswords() {
+        checkPw.setEnabled(false);
+        securePw.setEnabled(false);
+        pwStatus.setText("Checking...");
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                return PasswordStorage.countUnhashed();
+            }
+
+            @Override
+            protected void done() {
+                checkPw.setEnabled(true);
+                try {
+                    int n = get();
+                    pwStatus.setText(n == 0 ? "None: every account's password is hashed" : n + (n == 1 ? " account" : " accounts"));
+                    securePw.setEnabled(n > 0);
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    pwStatus.setText("FAILED: " + (c.getMessage() == null ? c.toString() : firstLine(c.getMessage())));
+                }
+            }
+        }.execute();
+    }
+
+    private void securePasswords() {
+        if (JOptionPane.showConfirmDialog(this,
+                "Store the remaining plain-text passwords as hashes?\n\n"
+                        + "Nobody's password changes and nobody is signed out. This writes to the database\n"
+                        + "and is recorded in the audit log (without the passwords).",
+                "Secure stored passwords", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        checkPw.setEnabled(false);
+        securePw.setEnabled(false);
+        pwStatus.setText("Securing... (about a second per account)");
+        new SwingWorker<PasswordStorage.Result, Void>() {
+            @Override
+            protected PasswordStorage.Result doInBackground() throws Exception {
+                return PasswordStorage.secureAll();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    PasswordStorage.Result r = get();
+                    JOptionPane.showMessageDialog(SettingsPanel.this, "Secured " + r.secured + (r.secured == 1 ? " account" : " accounts")
+                                    + (r.skipped > 0 ? "; " + r.skipped + " changed in the meantime and were left as they are." : "."),
+                            "Secure stored passwords", JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    JOptionPane.showMessageDialog(SettingsPanel.this, "Stopped: " + c.getMessage()
+                                    + "\nAccounts already secured stay secured; run it again to finish.",
+                            "Secure stored passwords", JOptionPane.ERROR_MESSAGE);
+                }
+                checkPasswords();   // show what the database says now
             }
         }.execute();
     }
