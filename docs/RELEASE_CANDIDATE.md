@@ -34,6 +34,26 @@ Intended, checked and not a finding:
   - Every `trimax_private` function is owner only.
 - **No table is readable or writable by `anon` or `authenticated`.**
 
+## Lance's unpushed commit `ed5b7d5` (`fix/driver-started-delivered`, pushed 2026-10-26)
+
+This commit was found in the hygiene check on the laptop (built on an older base, `e75c8c6`).
+
+**Already in the RC:** its delivery rules (ASSIGNED -> STARTED -> DELIVERED, FAILED once started) and the proof screen sending the status the server reported.
+
+**Ported into the Android RC:**
+- Hero card main button follows the server's status:
+  - A booking waiting for the administrator now opens the details. Before, it tried to start and the server refused.
+  - A second tap or a refresh cannot send Start twice.
+  - Navigation opens with the saved booking.
+- The details screen reloads after a refused or timed-out step.
+- Tests with real server replies (start, repeated start, drop-off) and the request sent to Supabase.
+- `docs/MOBILE_INTEGRATION.md` brought up to date.
+
+**Not ported (Lance decides):**
+- Its button wording ("DROP OFF / COMPLETE DELIVERY", hero card "START DELIVERY"). The RC keeps Lance's later labels: "START NAVIGATION" and "DROP-OFF PHOTO & PROOF OF DELIVERY".
+- A "next:" hint on the deliveries list.
+- A message about outdated server rules. It no longer applies: the live server has the new rules.
+
 ## Database: live compared with the reviewed files (read-only, 2026-10-26)
 
 A database was built locally from the repository files in order:
@@ -71,6 +91,7 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | Desktop: report export equals screen, every tab and grouping | 111/111 |
 | Desktop: password securing SQL on a test DB (compare-and-set, login still works, wrong password refused) | passed |
 | Android: 12 of 13 unit-test classes (stand-ins for Android classes) | 46/46 passed |
+| Android on Lance's laptop (real SDK): `gradlew testDebugUnitTest` on `release/rc-1` (`f930545`, before the `ed5b7d5` port) | BUILD SUCCESSFUL |
 | Android: `SupabaseClientTest` (needs OkHttp MockWebServer from Gradle) | **not run here** |
 | Secret scan, all branches and history, both repos | P0-1 and P0-2 above; nothing else (only the publishable key and placeholders) |
 | Branch ancestry and merge dry-run into `master` | both RCs contain `master` |
