@@ -19,7 +19,7 @@ public class MainFrame extends JFrame {
     private static final String[][] PAGES = {
             // { sidebar label, header title, header subtitle }
             {"Dashboard", "Dashboard", "Overview of today's operations"},
-            {"Sales & Profit", "Sales & Profit", "Net sales, cost of goods, gross profit, payroll and net profit"},
+            {"Sales & Profit", "Sales & Profit", "Net sales, cost of goods, gross profit, payroll, other expenses and net profit"},
             {"Walk-In / In-House", "Walk-In / In-House Sales", "Sell at the store or for a saved customer; receipts, payments and voids"},
             {"Inventory", "Inventory", "Products, puhunan and patong, prices, restocking and stock history"},
             {"Bookings", "Bookings", "All bookings and their status"},
@@ -28,6 +28,7 @@ public class MainFrame extends JFrame {
             {"Agents & Drivers", "Agents & Drivers", "Accounts, roles and account status"},
             {"Attendance", "Attendance", "Start and end of duty from the mobile app, with photo, time and location"},
             {"Payroll", "Payroll", "Pay per employee and pay period; paid and unpaid (Admin only)"},
+            {"Expenses", "Other Expenses", "Electricity, rent, fuel and other costs; they lower net profit (Admin only)"},
             {"Customers", "Customers", "Customer records, photos, assigned agents and locations"},
             {"Analytics & Reports", "Analytics & Reports", "Booking volume, completion and cancellation, with CSV, Excel and PDF export"},
             {"Notifications", "Notifications", "Operational alerts and announcements"},
@@ -85,12 +86,13 @@ public class MainFrame extends JFrame {
         attendancePanel = new AttendancePanel();
         mainContentPanel.add(attendancePanel, PAGES[ATTENDANCE_PAGE][0]);
         mainContentPanel.add(new PayrollPanel(), PAGES[9][0]);
-        mainContentPanel.add(new ClientsPanel(), PAGES[10][0]);
-        mainContentPanel.add(new AnalyticsPanel(), PAGES[11][0]);
+        mainContentPanel.add(new ExpensesPanel(), PAGES[10][0]);
+        mainContentPanel.add(new ClientsPanel(), PAGES[11][0]);
+        mainContentPanel.add(new AnalyticsPanel(), PAGES[12][0]);
         notificationsPanel = new NotificationsPanel(this::refreshBell);
         mainContentPanel.add(notificationsPanel, PAGES[NOTIFICATIONS_PAGE][0]);
-        mainContentPanel.add(new AuditLogsPanel(), PAGES[13][0]);
-        mainContentPanel.add(new SettingsPanel(), PAGES[14][0]);
+        mainContentPanel.add(new AuditLogsPanel(), PAGES[14][0]);
+        mainContentPanel.add(new SettingsPanel(), PAGES[15][0]);
 
         JPanel right = new JPanel(new BorderLayout());
         right.setBackground(Theme.BACKGROUND);
@@ -231,7 +233,7 @@ public class MainFrame extends JFrame {
 
     private static final int PROFIT_PAGE = 1;
     private static final int ATTENDANCE_PAGE = 8;
-    private static final int NOTIFICATIONS_PAGE = 12;
+    private static final int NOTIFICATIONS_PAGE = 13;
 
     /**
      * Updates the bell's unread count. If the count cannot be known (table missing, database error) the
