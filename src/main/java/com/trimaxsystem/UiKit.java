@@ -382,6 +382,66 @@ public final class UiKit {
         }
     }
 
+    /**
+     * A page body that is as wide as the scroll pane it sits in (so cards and grids shrink with the window
+     * instead of being cut off on the right) and only scrolls vertically.
+     */
+    public static final class PageBody extends JPanel implements javax.swing.Scrollable {
+        public PageBody() {
+            setLayout(new javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS));
+            setBackground(Theme.BACKGROUND);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle r, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle r, int orientation, int direction) {
+            return Math.max(16, r.height - 32);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+
+        /** This body in a vertical-only scroll pane with no border. */
+        public JScrollPane inScroll() {
+            JScrollPane sp = new JScrollPane(this, javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                    javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+            sp.setBorder(BorderFactory.createEmptyBorder());
+            sp.getVerticalScrollBar().setUnitIncrement(16);
+            sp.getViewport().setBackground(Theme.BACKGROUND);
+            return sp;
+        }
+    }
+
+    /** Plain text that wraps to the width it gets (a JLabel does not), not editable, no background. */
+    public static javax.swing.JTextArea wrapText(String text, java.awt.Font font, Color color) {
+        javax.swing.JTextArea a = new javax.swing.JTextArea(text);
+        a.setEditable(false);
+        a.setFocusable(false);
+        a.setOpaque(false);
+        a.setLineWrap(true);
+        a.setWrapStyleWord(true);
+        a.setFont(font);
+        a.setForeground(color);
+        a.setBorder(BorderFactory.createEmptyBorder());
+        return a;
+    }
+
     public static void styleField(JTextField f) {
         f.setFont(Theme.SUBTLE);
         if (Laf.isFlat()) {

@@ -38,6 +38,7 @@ public class ClientsPanel extends JPanel {
     private static final class Row {
         int id, agentCount;
         String name, address, contact, agents, firstAgent, agentCsv;
+        String photoPath, photoBy, photoAt;   // customer photo taken by an agent's phone (20261027_01)
         Double lat, lon;
 
         boolean hasLocation() {
@@ -77,7 +78,7 @@ public class ClientsPanel extends JPanel {
     private final TileMapView map = new TileMapView();
     private final JSplitPane split;
     private final DefaultTableModel model = new DefaultTableModel(
-            new String[]{"ID", "Customer", "Address", "Contact number", "Assigned agent", "Latitude", "Longitude"}, 0) {
+            new String[]{"Photo", "ID", "Customer", "Address", "Contact number", "Assigned agent", "Latitude", "Longitude"}, 0) {
         @Override
         public boolean isCellEditable(int r, int c) {
             return false;
@@ -112,11 +113,15 @@ public class ClientsPanel extends JPanel {
         mapCard.add(map, BorderLayout.CENTER);
         mapCard.setMinimumSize(new Dimension(100, 160));
 
-        table.setRowHeight(28);
+        table.setRowHeight(40);
         table.setFillsViewportHeight(true);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.getColumnModel().getColumn(0).setPreferredWidth(40);
-        table.getColumnModel().getColumn(2).setPreferredWidth(240);
+        table.getColumnModel().getColumn(0).setPreferredWidth(64);
+        table.getColumnModel().getColumn(0).setMinWidth(60);
+        table.getColumnModel().getColumn(0).setMaxWidth(70);
+        table.getColumnModel().getColumn(0).setCellRenderer(new PhotoRenderer());
+        table.getColumnModel().getColumn(1).setPreferredWidth(40);
+        table.getColumnModel().getColumn(3).setPreferredWidth(240);
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting() || adjusting) return;
             onRowSelected();
@@ -256,17 +261,175 @@ public class ClientsPanel extends JPanel {
         filters.add(btnClearFilters);
         filters.add(summary);
 
-        JPanel card = new JPanel();
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        JPanel rows = new JPanel();
+        rows.setOpaque(false);
+        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
+        rows.add(form);
+        rows.add(location);
+        rows.add(actions);
+        rows.add(formError);
+        rows.add(filters);
+        JPanel card = new JPanel(new BorderLayout(12, 0));
         card.setBackground(Theme.CARD);
-        card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Theme.BORDER),
-                new EmptyBorder(8, 10, 8, 10)));
-        card.add(form);
-        card.add(location);
-        card.add(actions);
-        card.add(formError);
-        card.add(filters);
+        card.setBorder(UiKit.cardBorder(8, 10));
+        card.add(rows, BorderLayout.CENTER);
+        card.add(buildPhotoBox(), BorderLayout.EAST);
         return card;
+    }
+
+    // =====================================================
+    // CUSTOMER PHOTO (taken by the agent's phone; private, opened with a one-time ticket)
+    // =====================================================
+
+    private static final int PHOTO = 96, THUMB = 34;
+    private final JLabel photo = new JLabel("", SwingConstants.CENTER);
+    private final JLabel photoNote = new JLabel(" ");
+    private final JButton photoRetry = UiKit.secondaryButton("Retry");
+    private final java.util.Set<String> thumbsLoading = new java.util.HashSet<>();
+    private final java.util.Set<String> thumbsFailed = new java.util.HashSet<>();
+    private int photoSeq;
+
+    private JComponent buildPhotoBox() {
+        photo.setPreferredSize(new Dimension(PHOTO, PHOTO));
+        photo.setMinimumSize(new Dimension(PHOTO, PHOTO));
+        photo.setOpaque(true);
+        photo.setBackground(Theme.SUBTLE_BG);
+        photo.setForeground(Theme.MUTED);
+        photo.setFont(Theme.SMALL);
+        photo.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+        photoNote.setFont(Theme.SMALL);
+        photoNote.setForeground(Theme.MUTED);
+        photoNote.setPreferredSize(new Dimension(170, 64));
+        photoNote.setVerticalAlignment(SwingConstants.TOP);
+        photoRetry.setVisible(false);
+        photoRetry.addActionListener(e -> showPhoto());
+        JPanel right = new JPanel(new BorderLayout(0, 4));
+        right.setOpaque(false);
+        right.add(UiKit.caption("Customer photo"), BorderLayout.NORTH);
+        right.add(photoNote, BorderLayout.CENTER);
+        right.add(photoRetry, BorderLayout.SOUTH);
+        JPanel box = new JPanel(new BorderLayout(10, 0));
+        box.setOpaque(false);
+        box.add(photo, BorderLayout.WEST);
+        box.add(right, BorderLayout.CENTER);
+        JPanel wrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        wrap.setOpaque(false);
+        wrap.add(box);
+        showPhoto();
+        return wrap;
+    }
+
+    private Row selectedRow() {
+        if (selectedClientId == null) return null;
+        for (Row r : shown) if (r.id == selectedClientId) return r;
+        return null;
+    }
+
+    /** The selected customer's photo (downloaded in the background), or a clean placeholder. */
+    private void showPhoto() {
+        final int mySeq = ++photoSeq;
+        photoRetry.setVisible(false);
+        Row r = selectedRow();
+        photo.setIcon(null);
+        if (r == null) {
+            photo.setText("<html><center>No customer<br>selected</center></html>");
+            photoNote.setText("<html>Agents must add a photo when they save a new customer on the phone.</html>");
+            return;
+        }
+        if (r.photoPath == null) {
+            photo.setText("<html><center>No photo</center></html>");
+            photoNote.setText("<html>This customer was added before photos were required, or on the Desktop.</html>");
+            return;
+        }
+        String who = "<html>Taken by " + StockDialogs.esc(r.photoBy == null ? "an agent" : r.photoBy)
+                + (r.photoAt == null ? "" : "<br>" + StockDialogs.esc(r.photoAt.length() >= 10 ? r.photoAt.substring(0, 10) : r.photoAt))
+                + "</html>";
+        java.awt.image.BufferedImage cached = MediaService.cached(MediaService.CUSTOMER_PHOTOS, r.photoPath);
+        if (cached != null) {
+            photo.setText(null);
+            photo.setIcon(new ImageIcon(InventoryPanel.fit(cached, PHOTO - 4)));
+            photoNote.setText(who);
+            return;
+        }
+        photo.setText("<html><center>Loading...</center></html>");
+        photoNote.setText(who);
+        final String path = r.photoPath;
+        new SwingWorker<java.awt.image.BufferedImage, Void>() {
+            @Override
+            protected java.awt.image.BufferedImage doInBackground() throws Exception {
+                return MediaService.load(MediaService.CUSTOMER_PHOTOS, path);
+            }
+
+            @Override
+            protected void done() {
+                if (mySeq != photoSeq) return;
+                try {
+                    java.awt.image.BufferedImage img = get();
+                    photo.setText(null);
+                    photo.setIcon(new ImageIcon(InventoryPanel.fit(img, PHOTO - 4)));
+                    table.repaint();
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    photo.setText("<html><center>Photo not<br>available</center></html>");
+                    photoNote.setText("<html>" + StockDialogs.esc(c.getMessage()) + "</html>");
+                    photoRetry.setVisible(true);
+                }
+            }
+        }.execute();
+    }
+
+    /** Small photo in the table, downloaded once in the background; a dash when there is none. */
+    private final class PhotoRenderer extends javax.swing.table.DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable t, Object value, boolean selected, boolean focus,
+                                                       int row, int column) {
+            super.getTableCellRendererComponent(t, "", selected, false, row, column);
+            setHorizontalAlignment(SwingConstants.CENTER);
+            setIcon(null);
+            String path = value == null ? "" : value.toString();
+            if (path.isEmpty()) {
+                setText("\u2014");
+                setForeground(Theme.MUTED);
+                setToolTipText("No photo");
+                return this;
+            }
+            java.awt.image.BufferedImage img = MediaService.cached(MediaService.CUSTOMER_PHOTOS, path);
+            if (img != null) {
+                setIcon(new ImageIcon(InventoryPanel.fit(img, THUMB)));
+                setToolTipText(null);
+            } else if (thumbsFailed.contains(path)) {
+                setText("!");
+                setForeground(Theme.DANGER);
+                setToolTipText("The photo could not be loaded. Search again to retry.");
+            } else {
+                setText("...");
+                setForeground(Theme.MUTED);
+                loadThumb(path);
+            }
+            return this;
+        }
+    }
+
+    private void loadThumb(String path) {
+        if (!thumbsLoading.add(path)) return;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                MediaService.load(MediaService.CUSTOMER_PHOTOS, path);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    thumbsLoading.remove(path);
+                } catch (Exception ignored) {
+                    thumbsFailed.add(path);
+                }
+                table.repaint();
+            }
+        }.execute();
     }
 
     // =====================================================
@@ -336,7 +499,8 @@ public class ClientsPanel extends JPanel {
                             + "COALESCE(STRING_AGG(u.name, ', ' ORDER BY u.name), 'Unassigned') AS agents, "
                             + "COUNT(a.agent_id) AS agent_count, MIN(u.username) AS first_agent, "
                             + "COALESCE(STRING_AGG(u.username, ',' ORDER BY u.username), '') AS agent_users, "
-                            + "c.latitude, c.longitude "
+                            + "c.latitude, c.longitude, (to_jsonb(c) ->> 'photo_path') AS photo_path, "
+                            + "(to_jsonb(c) ->> 'photo_by') AS photo_by, (to_jsonb(c) ->> 'photo_updated_at') AS photo_at "
                             + "FROM clients c LEFT JOIN agents a ON a.client_id = c.client_id "
                             + "LEFT JOIN users u ON u.username = a.username GROUP BY c.client_id "
                             + "HAVING (c.client_id::text ILIKE ? OR c.client_name ILIKE ? OR c.address ILIKE ? "
@@ -362,6 +526,9 @@ public class ClientsPanel extends JPanel {
                         BigDecimal la = rs.getBigDecimal("latitude"), lo = rs.getBigDecimal("longitude");
                         r.lat = la == null ? null : la.doubleValue();
                         r.lon = lo == null ? null : lo.doubleValue();
+                        r.photoPath = rs.getString("photo_path");
+                        r.photoBy = rs.getString("photo_by");
+                        r.photoAt = rs.getString("photo_at");
                         data.rows.add(r);
                     }
                 }
@@ -388,13 +555,16 @@ public class ClientsPanel extends JPanel {
         }
         shown = data.rows;
         selectedClientId = null;
+        thumbsFailed.clear();
+        thumbsLoading.clear();
+        showPhoto();
         savedLat = null;
         savedLon = null;
 
         adjusting = true;
         model.setRowCount(0);
         for (Row r : shown) {
-            model.addRow(new Object[]{r.id, r.name, r.address, r.contact, r.agents,
+            model.addRow(new Object[]{r.photoPath == null ? "" : r.photoPath, r.id, r.name, r.address, r.contact, r.agents,
                     r.lat == null ? "" : r.lat, r.lon == null ? "" : r.lon});
         }
         table.clearSelection();
@@ -557,6 +727,7 @@ public class ClientsPanel extends JPanel {
         coordsEdited();
         map.setSelected(String.valueOf(r.id));
         if (r.hasLocation()) map.focusMarker(String.valueOf(r.id));
+        showPhoto();
     }
 
     private void selectClientById(String id) {
@@ -590,6 +761,7 @@ public class ClientsPanel extends JPanel {
         adjusting = false;
         map.setSelected(null);
         coordsEdited();
+        showPhoto();
     }
 
     // =====================================================

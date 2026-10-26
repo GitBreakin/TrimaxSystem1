@@ -1,5 +1,7 @@
 package com.trimaxsystem;
 
+import java.math.BigDecimal;
+
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.File;
@@ -188,7 +190,13 @@ public class BookingDetailDialog extends JDialog {
                     + (DeliveryStatus.FAILED.equals(d.deliveryStatus)
                     ? "  -  review the reason in History, then cancel the booking to return its stock" : ""));
         }
-        addRow(grid, r++, "Total", Theme.money(d.total));
+        if (d.hasDiscount()) {
+            BigDecimal original = d.subtotal != null ? d.subtotal : d.total.add(d.discountAmount);
+            addRow(grid, r++, "Original price", Theme.money(original));
+            addRow(grid, r++, "Agent discount", "\u2212 " + Theme.money(d.discountAmount) + "  (" + d.discountText()
+                    + (d.discountAt == null ? "" : ", " + Theme.formatWhen(d.discountAt)) + ")");
+        }
+        addRow(grid, r++, d.hasDiscount() ? "Final price" : "Total", Theme.money(d.total));
         return card(grid);
     }
 
@@ -366,6 +374,11 @@ public class BookingDetailDialog extends JDialog {
         data.driverUsername = detail.driverUsername == null ? "Unassigned" : detail.driverUsername;
         data.vehicleId = detail.vehicleId == null ? "None" : detail.vehicleId;
         data.total = detail.total;
+        if (detail.hasDiscount()) {
+            data.discount = detail.discountAmount;
+            data.subtotal = detail.subtotal != null ? detail.subtotal : detail.total.add(detail.discountAmount);
+            data.discountNote = detail.discountText();
+        }
         data.items = new ArrayList<>();
         for (BookingService.Line line : detail.items) {
             data.items.add(new BookForClientPanel.OrderItem(

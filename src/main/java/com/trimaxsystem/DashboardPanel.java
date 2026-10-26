@@ -46,6 +46,11 @@ import javax.swing.table.JTableHeader;
  */
 public class DashboardPanel extends JPanel {
 
+    private java.util.function.Consumer<String> openProfit;
+    private final ProfitWidgets.PeriodStrip profitStrip = new ProfitWidgets.PeriodStrip(name -> {
+        if (openProfit != null) openProfit.accept(name);
+    });
+
     /** Day boundaries ("today", chart days) follow this time zone, not the database server's. */
     private static final ZoneId BUSINESS_TZ = ZoneId.of("Asia/Manila");
     private static final String TZ_SQL = "Asia/Manila";
@@ -176,12 +181,14 @@ public class DashboardPanel extends JPanel {
         g.insets = new Insets(0, 0, 14, 0);
 
         g.gridy = 0;
-        content.add(buildKpiRow(), g);
+        content.add(buildProfitRow(), g);
         g.gridy = 1;
-        content.add(twoColumns(buildTrendCard(), buildStatusCard(), 0.62), g);
+        content.add(buildKpiRow(), g);
         g.gridy = 2;
-        content.add(twoColumns(buildRecentCard(), buildActiveCard(), 0.62), g);
+        content.add(twoColumns(buildTrendCard(), buildStatusCard(), 0.62), g);
         g.gridy = 3;
+        content.add(twoColumns(buildRecentCard(), buildActiveCard(), 0.62), g);
+        g.gridy = 4;
         g.insets = new Insets(0, 0, 0, 0);
         content.add(twoColumns(buildDriversCard(), buildQuickStatsCard(), 0.62), g);
 
@@ -215,8 +222,26 @@ public class DashboardPanel extends JPanel {
     // LOADING
     // =====================================================
 
+    /** Sales & profit cards (Today ... This year); a click opens the Sales & Profit page. */
+    private JComponent buildProfitRow() {
+        JPanel box = new JPanel(new BorderLayout(0, 6));
+        box.setOpaque(false);
+        JLabel t = new JLabel("Sales & profit");
+        t.setFont(Theme.SECTION);
+        t.setForeground(Theme.TEXT);
+        box.add(t, BorderLayout.NORTH);
+        box.add(profitStrip, BorderLayout.CENTER);
+        return box;
+    }
+
+    /** Where a click on a sales & profit card goes (set by the main window). */
+    public void setOpenProfit(java.util.function.Consumer<String> open) {
+        this.openProfit = open;
+    }
+
     /** Reloads every section in the background. */
     public void refresh() {
+        profitStrip.reload();
         final boolean month = monthView;
         final boolean custom = customView;
         final LocalDate start = customStart;

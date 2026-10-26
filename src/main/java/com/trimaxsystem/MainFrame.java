@@ -19,13 +19,16 @@ public class MainFrame extends JFrame {
     private static final String[][] PAGES = {
             // { sidebar label, header title, header subtitle }
             {"Dashboard", "Dashboard", "Overview of today's operations"},
-            {"Inventory", "Inventory", "Products, suppliers, prices and stock"},
+            {"Sales & Profit", "Sales & Profit", "Net sales, cost of goods, gross profit, payroll and net profit"},
+            {"Walk-In / In-House", "Walk-In / In-House Sales", "Sell at the store or for a saved customer; receipts, payments and voids"},
+            {"Inventory", "Inventory", "Products, puhunan and patong, prices, restocking and stock history"},
             {"Bookings", "Bookings", "All bookings and their status"},
             {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions (current / stale)"},
             {"Manage Vehicles", "Manage Vehicles", "Vehicle records, status, and driver assignments"},
             {"Agents & Drivers", "Agents & Drivers", "Accounts, roles and account status"},
             {"Attendance", "Attendance", "Start and end of duty from the mobile app, with photo, time and location"},
-            {"Customers", "Customers", "Customer records, assigned agents and locations"},
+            {"Payroll", "Payroll", "Pay per employee and pay period; paid and unpaid (Admin only)"},
+            {"Customers", "Customers", "Customer records, photos, assigned agents and locations"},
             {"Analytics & Reports", "Analytics & Reports", "Booking volume, completion and cancellation, with CSV, Excel and PDF export"},
             {"Notifications", "Notifications", "Operational alerts and announcements"},
             {"Audit Logs", "Audit Logs", "Who changed what, and when (read-only)"},
@@ -40,6 +43,7 @@ public class MainFrame extends JFrame {
     private final JButton bell = headerIconButton(new HeaderIcon(true, 0), "Notifications");
     private NotificationsPanel notificationsPanel;
     private AttendancePanel attendancePanel;
+    private ProfitPanel profitPanel;
     private final NavButton[] navButtons = new NavButton[PAGES.length];
 
     /**
@@ -64,20 +68,29 @@ public class MainFrame extends JFrame {
         getContentPane().setBackground(Theme.BACKGROUND);
 
         // --- SCREENS (CENTER) ---
-        mainContentPanel.add(new DashboardPanel(onReady), PAGES[0][0]);
-        mainContentPanel.add(new InventoryPanel(), PAGES[1][0]);
-        mainContentPanel.add(new BookingsPanel(), PAGES[2][0]);
-        mainContentPanel.add(buildLiveGpsPage(), PAGES[3][0]);
-        mainContentPanel.add(new ManageVehiclesPanel(), PAGES[4][0]);
-        mainContentPanel.add(new AccountsPanel(), PAGES[5][0]);
+        profitPanel = new ProfitPanel();
+        DashboardPanel dashboard = new DashboardPanel(onReady);
+        dashboard.setOpenProfit(name -> {
+            showPage(PROFIT_PAGE);
+            profitPanel.showPreset(name);
+        });
+        mainContentPanel.add(dashboard, PAGES[0][0]);
+        mainContentPanel.add(profitPanel, PAGES[PROFIT_PAGE][0]);
+        mainContentPanel.add(new SalesPanel(), PAGES[2][0]);
+        mainContentPanel.add(new InventoryPanel(), PAGES[3][0]);
+        mainContentPanel.add(new BookingsPanel(), PAGES[4][0]);
+        mainContentPanel.add(buildLiveGpsPage(), PAGES[5][0]);
+        mainContentPanel.add(new ManageVehiclesPanel(), PAGES[6][0]);
+        mainContentPanel.add(new AccountsPanel(), PAGES[7][0]);
         attendancePanel = new AttendancePanel();
         mainContentPanel.add(attendancePanel, PAGES[ATTENDANCE_PAGE][0]);
-        mainContentPanel.add(new ClientsPanel(), PAGES[7][0]);
-        mainContentPanel.add(new AnalyticsPanel(), PAGES[8][0]);
+        mainContentPanel.add(new PayrollPanel(), PAGES[9][0]);
+        mainContentPanel.add(new ClientsPanel(), PAGES[10][0]);
+        mainContentPanel.add(new AnalyticsPanel(), PAGES[11][0]);
         notificationsPanel = new NotificationsPanel(this::refreshBell);
         mainContentPanel.add(notificationsPanel, PAGES[NOTIFICATIONS_PAGE][0]);
-        mainContentPanel.add(new AuditLogsPanel(), PAGES[10][0]);
-        mainContentPanel.add(new SettingsPanel(), PAGES[11][0]);
+        mainContentPanel.add(new AuditLogsPanel(), PAGES[13][0]);
+        mainContentPanel.add(new SettingsPanel(), PAGES[14][0]);
 
         JPanel right = new JPanel(new BorderLayout());
         right.setBackground(Theme.BACKGROUND);
@@ -134,9 +147,19 @@ public class MainFrame extends JFrame {
             btn.addActionListener(e -> showPage(index));
             navButtons[i] = btn;
             nav.add(btn);
-            nav.add(Box.createVerticalStrut(4));
+            nav.add(Box.createVerticalStrut(3));
         }
-        sidebar.add(nav, BorderLayout.CENTER);
+        // The list scrolls on short screens, so every page stays reachable.
+        JPanel navHolder = new JPanel(new BorderLayout());
+        navHolder.setOpaque(false);
+        navHolder.add(nav, BorderLayout.NORTH);
+        JScrollPane navScroll = new JScrollPane(navHolder, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        navScroll.setBorder(BorderFactory.createEmptyBorder());
+        navScroll.setOpaque(false);
+        navScroll.getViewport().setOpaque(false);
+        navScroll.getVerticalScrollBar().setUnitIncrement(16);
+        sidebar.add(navScroll, BorderLayout.CENTER);
 
         // Signed-in admin + sign out, pinned to the bottom
         AuthService.Session session = AuthService.current();
@@ -206,8 +229,9 @@ public class MainFrame extends JFrame {
         return header;
     }
 
-    private static final int ATTENDANCE_PAGE = 6;
-    private static final int NOTIFICATIONS_PAGE = 9;
+    private static final int PROFIT_PAGE = 1;
+    private static final int ATTENDANCE_PAGE = 8;
+    private static final int NOTIFICATIONS_PAGE = 12;
 
     /**
      * Updates the bell's unread count. If the count cannot be known (table missing, database error) the
@@ -384,8 +408,8 @@ public class MainFrame extends JFrame {
             setOpaque(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setAlignmentX(Component.LEFT_ALIGNMENT);
-            setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
-            setPreferredSize(new Dimension(180, 42));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+            setPreferredSize(new Dimension(180, 38));
             addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override
                 public void mouseEntered(java.awt.event.MouseEvent e) {

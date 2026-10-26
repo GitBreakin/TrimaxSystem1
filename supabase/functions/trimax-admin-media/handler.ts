@@ -7,7 +7,8 @@
 // with public.trimax_service_redeem_media_ticket (service role only; one use, within 2 minutes), which
 // says which file and what for:
 //
-//   view    POST {"ticket": "<uuid>"}                       -> the photo's bytes (duty-photos, delivery-proofs)
+//   view    POST {"ticket": "<uuid>"}                       -> the photo's bytes (duty-photos, delivery-proofs,
+//                                                              customer-photos)
 //   upload  POST <JPEG bytes>, header x-trimax-ticket: <uuid> -> stores the product picture at the ticket's path
 //   delete  POST {"ticket": "<uuid>"}                       -> removes that product picture
 //
@@ -18,7 +19,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PHOTO_PATH = /^[A-Za-z0-9-]{1,64}\/[A-Za-z0-9_.-]{1,120}\.jpg$/;
 const PRODUCT_PATH = /^products\/[0-9]{1,9}\/[A-Za-z0-9_-]{1,80}\.jpg$/;
-const VIEW_BUCKETS = new Set(["duty-photos", "delivery-proofs"]);
+const VIEW_BUCKETS = new Set(["duty-photos", "delivery-proofs", "customer-photos"]);
 const PRODUCT_BUCKET = "product-images";
 const MAX_VIEW_BYTES = 6 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
