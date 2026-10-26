@@ -50,6 +50,10 @@ public class AccountsPanel extends JPanel {
     private AccountService.Query applied = new AccountService.Query();   // last applied filters, sort and page
     private int requestId = 0;
     private long totalRows = 0;
+    /** True while Clear all resets the controls, so their change listeners do not each start a reload. */
+    private boolean resetting = false;
+    /** Typing in the search box filters after a short pause, not on every key. */
+    private final Timer searchDelay = new Timer(300, e -> applyFilters());
 
     public AccountsPanel() {
         setBackground(Theme.BACKGROUND);
@@ -67,16 +71,35 @@ public class AccountsPanel extends JPanel {
 
     private JComponent buildFilterCard() {
         txtSearch.setToolTipText("Username, name, email or contact number");
-        UiKit.styleField(txtSearch);
-        txtSearch.addActionListener(e -> applyFilters());
+        UiKit.searchField(txtSearch, "Username, name, email or contact");
         cmbView.setFont(Theme.SUBTLE);
         cmbStatus.setFont(Theme.SUBTLE);
+        cmbView.setToolTipText("Which accounts to list");
+        cmbStatus.setToolTipText("Only accounts with this status");
 
-        JButton btnApply = UiKit.primaryButton("Apply filters");
+        // Filters apply as soon as they change: picking a role or status reloads the list at once, and the
+        // search runs after a short pause in typing (or on Enter). There is no separate Apply button, so
+        // what the controls show is always what the list shows.
+        searchDelay.setRepeats(false);
+        txtSearch.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { searchChanged(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { searchChanged(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { searchChanged(); }
+        });
+        txtSearch.addActionListener(e -> {
+            searchDelay.stop();
+            applyFilters();
+        });
+        cmbView.addActionListener(e -> {
+            if (!resetting) applyFilters();
+        });
+        cmbStatus.addActionListener(e -> {
+            if (!resetting) applyFilters();
+        });
+
         JButton btnClear = UiKit.secondaryButton("Clear all");
         JButton btnRefresh = UiKit.secondaryButton("Refresh");
         JButton btnCreateEmployee = UiKit.primaryButton("Create Employee Account");
-        btnApply.addActionListener(e -> applyFilters());
         btnClear.addActionListener(e -> clearFilters());
         btnRefresh.addActionListener(e -> load());
         btnCreateEmployee.addActionListener(e -> new CreateEmployeeAccountDialog(
@@ -89,7 +112,6 @@ public class AccountsPanel extends JPanel {
         row1.add(cmbView);
         row1.add(UiKit.caption("Status"));
         row1.add(cmbStatus);
-        row1.add(btnApply);
         row1.add(btnClear);
         row1.add(btnRefresh);
 
@@ -263,18 +285,35 @@ public class AccountsPanel extends JPanel {
     // FILTERS AND LOADING
     // =====================================================
 
+    private void searchChanged() {
+        if (!resetting) searchDelay.restart();
+    }
+
     private void applyFilters() {
-        applied.view = (String) cmbView.getSelectedItem();
-        applied.search = txtSearch.getText().trim();
-        applied.status = cmbStatus.getSelectedIndex() > 0 ? (String) cmbStatus.getSelectedItem() : null;
+        String view = (String) cmbView.getSelectedItem();
+        String search = txtSearch.getText().trim();
+        String status = cmbStatus.getSelectedIndex() > 0 ? (String) cmbStatus.getSelectedItem() : null;
+        // Typing a space or re-picking the same item changes nothing: keep the page and skip the reload.
+        if (view.equals(applied.view) && search.equals(applied.search) && java.util.Objects.equals(status, applied.status)) {
+            return;
+        }
+        applied.view = view;
+        applied.search = search;
+        applied.status = status;
         applied.page = 0;
         load();
     }
 
     private void clearFilters() {
-        txtSearch.setText("");
-        cmbView.setSelectedIndex(0);
-        cmbStatus.setSelectedIndex(0);
+        searchDelay.stop();
+        resetting = true;
+        try {
+            txtSearch.setText("");
+            cmbView.setSelectedIndex(0);
+            cmbStatus.setSelectedIndex(0);
+        } finally {
+            resetting = false;
+        }
         applied.view = AccountService.VIEW_AGENTS_DRIVERS;
         applied.search = "";
         applied.status = null;
