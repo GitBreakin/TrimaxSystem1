@@ -226,14 +226,24 @@ public class BookingDetailDialog extends JDialog {
     }
 
     private JComponent buildItemsCard(BookingService.Detail d) {
-        DefaultTableModel model = new DefaultTableModel(null, new String[]{"Product", "Qty", "Unit price", "Subtotal"}) {
+        // A discount per item (20261027_04) adds "Less / piece" and "Line total"; otherwise the table is as before.
+        boolean perItem = d.items.stream().anyMatch(l -> l.discountPerUnit != null && l.discountPerUnit.signum() > 0);
+        String[] cols = perItem ? new String[]{"Product", "Qty", "Unit price", "Less / piece", "Line total"}
+                                : new String[]{"Product", "Qty", "Unit price", "Subtotal"};
+        DefaultTableModel model = new DefaultTableModel(null, cols) {
             @Override
             public boolean isCellEditable(int r, int c) {
                 return false;
             }
         };
         for (BookingService.Line l : d.items) {
-            model.addRow(new Object[]{orDash(l.product), l.quantity, Theme.money(l.unitPrice), Theme.money(l.subtotal)});
+            if (perItem) {
+                model.addRow(new Object[]{orDash(l.product), l.quantity, Theme.money(l.unitPrice),
+                        l.discountPerUnit.signum() > 0 ? "\u2212 " + Theme.money(l.discountPerUnit) : "",
+                        Theme.money(l.lineTotal())});
+            } else {
+                model.addRow(new Object[]{orDash(l.product), l.quantity, Theme.money(l.unitPrice), Theme.money(l.subtotal)});
+            }
         }
 
         JTable t = new JTable(model);
@@ -246,7 +256,7 @@ public class BookingDetailDialog extends JDialog {
         t.getTableHeader().setFont(new Font("SansSerif", Font.BOLD, 12));
         DefaultTableCellRenderer right = new DefaultTableCellRenderer();
         right.setHorizontalAlignment(SwingConstants.RIGHT);
-        for (int c = 1; c < 4; c++) t.getColumnModel().getColumn(c).setCellRenderer(right);
+        for (int c = 1; c < cols.length; c++) t.getColumnModel().getColumn(c).setCellRenderer(right);
 
         JLabel heading = new JLabel("Items");
         heading.setFont(new Font("SansSerif", Font.BOLD, 15));
@@ -380,11 +390,15 @@ public class BookingDetailDialog extends JDialog {
             data.discountNote = detail.discountText();
         }
         data.items = new ArrayList<>();
+        List<java.math.BigDecimal> lineDiscounts = new ArrayList<>();
         for (BookingService.Line line : detail.items) {
             data.items.add(new BookForClientPanel.OrderItem(
                     "", orDash(line.product), line.unitPrice == null ? 0 : line.unitPrice.doubleValue(),
                     line.quantity, line.subtotal == null ? 0 : line.subtotal.doubleValue()));
+            lineDiscounts.add(line.lineDiscount());
         }
+        // Discounts per item print on their lines (the receipt's discount column), like Walk-In sales.
+        if (lineDiscounts.stream().anyMatch(x -> x.signum() > 0)) data.lineDiscounts = lineDiscounts;
         return data;
     }
 

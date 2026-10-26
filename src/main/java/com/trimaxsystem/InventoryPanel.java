@@ -46,6 +46,8 @@ public class InventoryPanel extends JPanel {
     private final JTextField txtMarkup = new JTextField(6);
     private final JTextField txtPrice = new JTextField(8);
     private final JTextField txtMinMarkup = new JTextField(8);
+    private final JCheckBox chkAgentDiscount = new JCheckBox("Agents may discount this item");
+    private boolean itemDiscountsSupported;
     private final JTextField txtStock = new JTextField(8);
     private final JLabel lblStockCaption = UiKit.caption("Starting stock");
     private final JLabel lblPricing = new JLabel(" ");
@@ -181,7 +183,12 @@ public class InventoryPanel extends JPanel {
         txtCost.setToolTipText("Puhunan: what one unit costs you (capital cost)");
         txtMarkup.setToolTipText("Patong: what you add on top of the puhunan, in pesos or as a percent of the puhunan");
         txtPrice.setToolTipText("Selling price = puhunan + patong. Typed in only for products without puhunan.");
-        txtMinMarkup.setToolTipText("Agents can discount a booking down to puhunan + this amount per unit, never below");
+        txtMinMarkup.setToolTipText("Agents can take something off each piece down to puhunan + this amount, never below");
+        chkAgentDiscount.setOpaque(false);
+        chkAgentDiscount.setFont(Theme.SUBTLE);
+        chkAgentDiscount.setToolTipText("Tick to let agents give a discount per piece on this item in the app "
+                + "(never below puhunan + minimum patong). Untick for items that are always sold at full price.");
+        chkAgentDiscount.addActionListener(e -> updatePricing());
         txtStock.setToolTipText("Stock on hand when you add the product. Later use Restock or Correct stock.");
 
         DocumentListener recalc = new DocumentListener() {
@@ -232,7 +239,11 @@ public class InventoryPanel extends JPanel {
         g.gridx = 2;
         fields.add(UiKit.group("Selling price (₱)", txtPrice), g);
         g.gridx = 3;
-        fields.add(UiKit.group("Minimum patong for discounts (₱)", txtMinMarkup), g);
+        JPanel minBox = new JPanel(new BorderLayout(0, 4));
+        minBox.setOpaque(false);
+        minBox.add(txtMinMarkup, BorderLayout.CENTER);
+        minBox.add(chkAgentDiscount, BorderLayout.SOUTH);
+        fields.add(UiKit.group("Minimum patong for discounts (₱)", minBox), g);
 
         g.gridy = 2;
         g.gridx = 0;
@@ -307,6 +318,7 @@ public class InventoryPanel extends JPanel {
         txtPrice.setText(p.price == null ? "" : p.price.toPlainString());
         txtMinMarkup.setText(p.minMarkup == null || p.minMarkup.signum() == 0 ? "" : p.minMarkup.toPlainString());
         txtStock.setText(String.valueOf(p.stock));
+        chkAgentDiscount.setSelected(Boolean.TRUE.equals(p.agentDiscount));
         updateFormMode();
     }
 
@@ -336,6 +348,8 @@ public class InventoryPanel extends JPanel {
         cmbMarkupType.setEnabled(pricingSupported && hasCost);
         txtMarkup.setEnabled(pricingSupported && hasCost);
         txtMinMarkup.setEnabled(pricingSupported);
+        chkAgentDiscount.setVisible(itemDiscountsSupported);
+        chkAgentDiscount.setEnabled(itemDiscountsSupported && pricingSupported && !saving);
         txtPrice.setEditable(!pricingSupported || !hasCost);
         if (pricingSupported) {
             lblStockCaption.setText(selected ? "In stock" : "Starting stock");
@@ -371,7 +385,8 @@ public class InventoryPanel extends JPanel {
             BigDecimal cost = Money.parse(txtCost.getText(), "puhunan", true);
             if (cost == null) {
                 lblPricing.setText(html("No puhunan: the price is typed in. Profit cannot be worked out and agents "
-                        + "cannot give discounts on this product until a puhunan is set."));
+                        + "cannot give discounts on this product until a puhunan is set."
+                        + (itemDiscountsSupported && chkAgentDiscount.isSelected() ? " (\"Agents may discount\" waits for the puhunan.)" : "")));
                 lblPricing.setForeground(Theme.MUTED);
                 return;
             }
@@ -388,7 +403,11 @@ public class InventoryPanel extends JPanel {
             BigDecimal margin = Money.marginPercent(cost, price);
             lblPricing.setText(html("Selling price " + Money.peso(price) + " = puhunan " + Money.peso(cost) + " + patong "
                     + Money.peso(price.subtract(cost)) + (margin == null ? "" : " (" + margin + "% of the price)")
-                    + ". Agents may discount down to " + Money.peso(floor) + " per unit."));
+                    + (!itemDiscountsSupported ? ". Agents may discount down to " + Money.peso(floor) + " per unit."
+                       : chkAgentDiscount.isSelected()
+                       ? ". Agents may take up to " + Money.peso(price.subtract(floor).max(BigDecimal.ZERO))
+                         + " off each piece (down to " + Money.peso(floor) + ")."
+                       : ". Agents cannot discount this item (tick \"Agents may discount\" to allow it).")));
             lblPricing.setForeground(Theme.TEXT);
         } catch (IllegalArgumentException ex) {
             lblPricing.setText(html(ex.getMessage()));
@@ -761,6 +780,7 @@ public class InventoryPanel extends JPanel {
             f.setText("");
         }
         cmbMarkupType.setSelectedIndex(0);
+        chkAgentDiscount.setSelected(false);
         selectedProductId = null;
         table.clearSelection();
         pendingJpeg = null;
@@ -791,6 +811,7 @@ public class InventoryPanel extends JPanel {
             InventoryService.Catalog catalog = InventoryService.list(keyword);
             picturesSupported = catalog.pictures;
             pricingSupported = catalog.pricing && Db.salesReady();
+            itemDiscountsSupported = catalog.itemDiscounts;
             for (InventoryService.Product p : catalog.products) {
                 String status = getStatus(p.stock);
                 if (statusFilter != null && !"All stock levels".equals(statusFilter) && !status.equals(statusFilter)) {
@@ -873,12 +894,14 @@ public class InventoryPanel extends JPanel {
         }
         final Integer id = add ? null : Integer.valueOf(selectedProductId);
         final String type = markupType();
+        final Boolean agentDiscount = itemDiscountsSupported ? chkAgentDiscount.isSelected() : null;
         saving = true;
         updateFormMode();
         new SwingWorker<Integer, Void>() {
             @Override
             protected Integer doInBackground() throws Exception {
-                return InventoryService.save(id, name, supplier, cost, type, markupValue, minMarkup, price, startingStock);
+                return InventoryService.save(id, name, supplier, cost, type, markupValue, minMarkup, price, startingStock,
+                        agentDiscount);
             }
 
             @Override
