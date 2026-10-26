@@ -9,7 +9,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_02`, `_03` | **Applied 2026-10-25**, with the owner's approval |
 | `_04` delivery proofs | **Applied 2026-10-25**, with the owner's approval |
 | `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Applied and deployed 2026-10-25**, with the owner's approval |
-| `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Not applied / not deployed.** Needs approval |
+| `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Applied and deployed 2026-10-26**, with the owner's approval |
+| `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
 
 ## Files (run in this order)
 
@@ -96,7 +97,18 @@ Tests: `sql/tests/41_media_tickets_tests.sql` (in `run_tests.sh`) and
 `node --experimental-strip-types supabase/functions/trimax-admin-media/test_handler.mjs` (Node 22+, fake
 Supabase on localhost; 13 checks).
 
-### `_06` + Edge Function v2 (Stage F, after approval)
+### `_06` + Edge Function v2 (Stage F): applied and deployed 2026-10-26
+
+Checked afterwards on production:
+- The 4 functions match this file (md5 of the bodies).
+- Grants: only the owner can issue picture tickets or set pictures; `trimax_list_products` is `authenticated` only; redeem is `service_role` only.
+- `product-images` is public, JPEG only, 2 MB, with no storage policies.
+- No rows changed (7 products, none with a picture; 0 tickets).
+- The Edge Function is version 2, ACTIVE, verify_jwt off; its `handler.ts` is byte-identical to this repo (sha256).
+- No new security advisor findings.
+
+The live upload check (a real picture through the function) is done from the Desktop, because this workspace cannot reach supabase.co. Steps kept for a fresh project:
+
 
 1. SQL Editor: run `20261025_06_product_images.sql`.
 2. Redeploy `supabase/functions/trimax-admin-media` (`index.ts` + `handler.ts`, verify_jwt = false). v2 adds

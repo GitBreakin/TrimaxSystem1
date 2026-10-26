@@ -70,12 +70,12 @@ It was then compared object by object with production:
 | Buckets `duty-photos`, `delivery-proofs` and the 4 storage policies | **identical** |
 | RLS flags and table grants (19 tables) | **identical** |
 | Legacy Desktop tables (`users`, `bookings`, `clients`, …) | differ from the **test reconstruction** only (`sql/tests/01_…`). They are not created by any migration. A schema-only dump of production would make a full rebuild exact (recommended, Lance's PC). |
-| Edge Function `trimax-admin-media` v1 (deployed) | same as repo commit `5db009c` (differs only by a final newline) |
-| Applied migrations on live | `_02`, `_03`, `_04`, `_05`. `_06` and `_07` are **not applied**. |
+| Edge Function `trimax-admin-media` | v1 matched repo `5db009c`; **v2 deployed 2026-10-26** = repo `handler.ts` (sha256 identical) |
+| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, and `_06` (2026-10-26, with approval). `_07` is **not applied**. |
 
 ### Waiting for separate approval (in this order)
 
-1. `20261025_06_product_images.sql`, then deploy `trimax-admin-media` v2 (Stage F). Either order is safe.
+1. ~~`20261025_06_product_images.sql`, then deploy `trimax-admin-media` v2 (Stage F).~~ **Done 2026-10-26** with approval. Verified: function md5 and grants, bucket, no rows changed, handler sha256, advisors unchanged.
 2. `20261025_07_alert_resolution.sql` (Stage G).
 3. Running "Secure them now" once (P1-1). It changes 7 stored values.
 

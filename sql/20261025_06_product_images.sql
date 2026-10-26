@@ -22,7 +22,8 @@
 --
 -- ORDER: after 20261025_05. Re-runnable. Adds 2 nullable columns to products, 1 bucket, 2 functions,
 -- widens the ticket table checks, replaces 2 functions (redeem, list products). Changes no rows.
--- NOT APPLIED to production. Needs approval.
+-- APPLIED to production on 2026-10-26 with the owner's approval (migration 20261025_06_product_images);
+-- Edge Function trimax-admin-media v2 deployed the same day (version 2, verify_jwt = false).
 -- =====================================================================================================
 
 begin;
