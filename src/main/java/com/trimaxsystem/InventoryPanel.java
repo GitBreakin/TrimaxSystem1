@@ -167,6 +167,10 @@ public class InventoryPanel extends JPanel {
         JButton btnSearch = UiKit.primaryButton("Search");
         btnSearch.addActionListener(e -> searchProducts());
 
+        JButton btnRefresh = UiKit.secondaryButton("Refresh");
+        btnRefresh.setToolTipText("Reload inventory from the shared database while keeping the current search and stock filter.");
+        btnRefresh.addActionListener(e -> loadInventory());
+
         JPanel card = new JPanel(new BorderLayout(12, 0));
         card.setBackground(Theme.CARD);
         card.setBorder(cardBorder());
@@ -192,7 +196,11 @@ public class InventoryPanel extends JPanel {
         c.weightx = 0;
         inputs.add(filterGroup, c);
         card.add(inputs, BorderLayout.CENTER);
-        card.add(btnSearch, BorderLayout.EAST);
+        JPanel actions = new JPanel(new GridLayout(2, 1, 0, 8));
+        actions.setOpaque(false);
+        actions.add(btnSearch);
+        actions.add(btnRefresh);
+        card.add(actions, BorderLayout.EAST);
         return card;
     }
 
