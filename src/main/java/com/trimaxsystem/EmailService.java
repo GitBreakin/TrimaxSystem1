@@ -122,11 +122,15 @@ public final class EmailService {
         String body;
         if (setup) {
             body = "Hello " + greeting + ",\n\n"
-                    + "An administrator created your TRIMAX employee account.\n\n"
+                    + "Your TRIMAX employee account is ready.\n\n"
                     + "Username: " + username + "\n"
-                    + "One-time password setup code: " + code + "\n\n"
-                    + "Enter this code in the TRIMAX password setup/reset screen to choose your own password. "
-                    + "The code expires in 15 minutes and can only be used once.\n\n"
+                    + "Sign-in email: " + recipient + "\n"
+                    + "One-time setup code: " + code + "\n\n"
+                    + "To choose your password for the TRIMAX mobile app:\n"
+                    + "1. Open the TRIMAX app and tap \"Set up or reset password\" on the sign-in screen.\n"
+                    + "2. Enter this email address, the code above and your new password.\n"
+                    + "3. Sign in with this email address and your new password.\n\n"
+                    + "The code works once and expires in 24 hours. If it expired, ask your administrator for a new one.\n\n"
                     + "If you were not expecting this account, contact your TRIMAX administrator.\n\n"
                     + "TRIMAX";
         } else {
@@ -136,7 +140,27 @@ public final class EmailService {
                     + "If you did not request a reset, contact your TRIMAX administrator.\n\n"
                     + "TRIMAX";
         }
-        send(recipient, setup ? "TRIMAX account password setup" : "TRIMAX password reset code", body);
+        send(recipient, setup ? "Your TRIMAX account: set your password" : "TRIMAX password reset code", body);
+    }
+
+    /**
+     * The new employee's first phone password. The app asks for a new password at the first sign-in.
+     */
+    public static void sendTemporaryPassword(String recipient, String fullName, String username, String temporaryPassword)
+            throws Exception {
+        String greeting = hasText(fullName) ? fullName.trim() : "TRIMAX user";
+        send(recipient, "Your TRIMAX account",
+                "Hello " + greeting + ",\n\n"
+                        + "Your TRIMAX employee account is ready.\n\n"
+                        + "Username: " + username + "\n"
+                        + "Sign-in email: " + recipient + "\n"
+                        + "Temporary password: " + temporaryPassword + "\n\n"
+                        + "1. Open the TRIMAX app on your phone.\n"
+                        + "2. Sign in with this email address and the temporary password (capital letters count).\n"
+                        + "3. The app then asks you to choose your own password.\n\n"
+                        + "If the temporary password does not work, ask your administrator.\n"
+                        + "If you were not expecting this account, contact your TRIMAX administrator.\n\n"
+                        + "TRIMAX");
     }
 
     /** A short test message, so the settings can be checked without creating an account. */

@@ -81,13 +81,64 @@ It does not delete, rename or rewrite any existing data, and does not touch PR #
 6. (Optional, after reading it) `sql/20261023_02_optional_rls_hardening.sql`.
 7. **Supabase Auth settings.** Turn off public sign-ups ("Allow new users to sign up") so only accounts
    you create exist. Linking never trusts sign-up metadata, but closed sign-up keeps the user list clean.
-8. **Create a Supabase sign-in for each agent/driver who uses the app.** Authentication → Users →
-   Add user → Create new user: the **same email** as the TRIMAX account on the desktop, a password, and
-   *Auto Confirm User* ticked (or *Invite* and let them set it). Roles are **not** set here.
-9. **Link it on the desktop.** Accounts → open the agent or driver → **Link mobile sign-in**. The link is
-   made only if a confirmed Supabase user with exactly that email exists. **Remove mobile sign-in**
-   revokes it; setting the account Inactive also blocks the app on its next call.
+8. **Sign-ins for agents and drivers (no Dashboard step).** After `sql/20261026_01_employee_mobile_sign_in.sql`
+   and the Edge Function `supabase/functions/trimax-accounts` are live (see the section below),
+   **Agents & Drivers → Create Employee Account** also creates the person's Supabase sign-in, links it
+   and gives it a temporary password (`Kenjie-7Q4M`: first name + 4 random characters), shown once to the
+   admin and emailed. The app asks for the person's own password at the first sign-in. For an account
+   made earlier: open it → **Create mobile sign-in**. A forgotten phone password: open the account →
+   **Send new setup code**, then **Set up or reset password** in the app. Roles are never set in Supabase.
+9. **Sign-ins made by hand before this** (Supabase → Authentication → Users): open the account →
+   **Link mobile sign-in**. The link is made only if a confirmed Supabase user with exactly that email
+   exists. **Remove mobile sign-in** revokes it; setting the account Inactive also blocks the app on its
+   next call.
 10. **Build the app** from the Android branch (see the Android repo's `docs/MOBILE_INTEGRATION.md`).
+
+## Employee sign-ins without the Supabase Dashboard (`20261026_01` + `trimax-accounts`)
+
+```
+Desktop (admin, JDBC)                     Supabase (server)                                   Phone
+---------------------                     -----------------                                   -----
+Create Employee Account
+  users row + setup code (hashed) + email
+  issue_provisioning_ticket(admin, user) -> queue (provisioning_requests), one-time ticket
+  POST trimax-accounts {provision, ticket, -> claim ticket -> Auth Admin API: create user
+        temporary_password}                   (email confirmed, the temporary password,
+                                              user_metadata.must_change_password, app_metadata
+                                              trimax_provisioned/trimax_username)
+                                           -> trimax_service_finish_provisioning: link
+  shows the temporary password once and emails it                                    sign in with it -> must
+                                                                                     choose own password
+                                                                                     (PUT /auth/v1/user)
+                                                                                     Forgot it later -> Set up
+                                                                                     or reset password:
+                                           <- POST trimax-accounts {set_password, email, code, new password}
+                                              trimax_service_use_setup_code (1 use, 5 tries, 24 h)
+                                              -> Auth Admin API: set that user's password
+                                                                                     sign in as usual
+```
+
+* The secret key exists only in the Edge Function's environment (Supabase sets it). The Desktop holds
+  no Supabase key; the phone only the publishable key.
+* Only an Active Admin can get a ticket (checked in the database, not by the Desktop screen). A ticket
+  works once, for 2 minutes, for one account.
+* Retrying is safe: a second press while one is running answers "busy"; after a cut-off call the retry
+  finds the Auth user the first call made and links it instead of creating another one.
+* A sign-in someone made by hand with the same email is not taken over: the admin gets "use Link mobile
+  sign-in".
+* The same migration fixes the audit actor of the existing `trimax_service_finish_provisioning` (it wrote
+  `provisioning`, which `audit_log`'s foreign key refuses, so it could never have succeeded).
+
+Installed on production 2026-10-26 (with approval; function v2 since 15:31). To install elsewhere: run `sql/20261026_01_employee_mobile_sign_in.sql`, then
+deploy `supabase/functions/trimax-accounts` (`index.ts` + `handler.ts`) with **verify_jwt = false** (the
+ticket or the code is the authorization). No secret has to be added. Rollback:
+`sql/20261026_94_rollback_employee_mobile_sign_in.sql` (keeps every sign-in and link), and delete the
+function.
+
+Local checks: `sql/tests/run_tests.sh` (part "Employee mobile sign-in"),
+`node --experimental-strip-types supabase/functions/trimax-accounts/test_handler.mjs`, and
+`supabase/functions/trimax-accounts/local_supabase.mjs` to try the Desktop and the phone against a
+disposable local database.
 
 ## End-to-end test (real project, after setup)
 

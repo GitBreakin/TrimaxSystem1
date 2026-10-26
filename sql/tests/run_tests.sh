@@ -108,4 +108,15 @@ test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'resolve_a
 test "$(psql_owner -tAc "select count(*) from admin_notifications where resolved_at is not null")" -gt 0 && echo "PASS stage G rollback kept the recorded resolutions"
 psql_owner -f 20261025_07_alert_resolution.sql
 echo "PASS stage G re-applies after rollback"
+echo "== Employee mobile sign-in: provisioning tickets and setup codes (twice: re-runnable)"
+psql_owner -f 20261026_01_employee_mobile_sign_in.sql
+psql_owner -f 20261026_01_employee_mobile_sign_in.sql
+psql_su -d "$DB" -f tests/44_employee_mobile_sign_in_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL EMPLOYEE SIGN-IN SQL TESTS PASSED/p; /ERROR/p; /CONTEXT/p'
+echo "== Employee mobile sign-in rollback, then re-apply"
+psql_owner -f 20261026_94_rollback_employee_mobile_sign_in.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('issue_provisioning_ticket','claim_provisioning_request','trimax_service_claim_provisioning_ticket','trimax_service_use_setup_code')")" = "0" && echo "PASS rollback removed the 4 functions"
+test "$(psql_owner -tAc "select count(*) from trimax_private.mobile_accounts where username in ('agent.new','driver.retry')")" = "2" && echo "PASS rollback kept the sign-ins and their links"
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'trimax_service_finish_provisioning' and prosrc like '%audit_user(''provisioning''%'")" = "1" && echo "PASS rollback put back the previous finish function"
+psql_owner -f 20261026_01_employee_mobile_sign_in.sql
+echo "PASS employee sign-in re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"

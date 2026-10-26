@@ -137,21 +137,19 @@ final class CreateEmployeeAccountDialog extends JDialog {
         String contactNumber = contact;
         String role = (String) cmbRole.getSelectedItem();
         setBusy(true);
-        new SwingWorker<String, Void>() {
+        new SwingWorker<EmployeeOnboarding.Outcome, Void>() {
             @Override
-            protected String doInBackground() throws Exception {
-                return AccountService.createEmployee(fullName, email, contactNumber, role);
+            protected EmployeeOnboarding.Outcome doInBackground() throws Exception {
+                // The account, then its phone sign-in with a temporary password, then the email.
+                return EmployeeOnboarding.createEmployee(fullName, email, contactNumber, role);
             }
 
             @Override
             protected void done() {
                 setBusy(false);
                 try {
-                    String username = get();
-                    JOptionPane.showMessageDialog(CreateEmployeeAccountDialog.this,
-                            "Employee account created.\nUsername: " + username
-                                    + "\nA one-time password setup code was emailed to the employee.",
-                            "Account Created", JOptionPane.INFORMATION_MESSAGE);
+                    EmployeeOnboarding.Outcome outcome = get();
+                    EmployeeOnboarding.show(CreateEmployeeAccountDialog.this, outcome, true);
                     if (onCreated != null) onCreated.run();
                     dispose();
                 } catch (Exception ex) {
@@ -166,7 +164,7 @@ final class CreateEmployeeAccountDialog extends JDialog {
 
     private void setBusy(boolean busy) {
         btnCreate.setEnabled(!busy);
-        btnCreate.setText(busy ? "Creating account..." : "Create employee account");
+        btnCreate.setText(busy ? "Creating account and sign-in..." : "Create employee account");
         setCursor(busy ? java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR)
                 : java.awt.Cursor.getDefaultCursor());
     }
