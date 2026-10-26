@@ -20,7 +20,7 @@ booking, line, customer or agent value changed. Next: install the new APK on eve
 | Sales & Profit dashboard | yes | no | no |
 | Payroll | yes | no | no |
 | Other expenses (`20261027_02`) | yes | no | no |
-| Discount on a booking | sees original / discount / final and who gave it | gives it (Pending bookings), up to the allowed maximum | no |
+| Discount on a booking (per item) | decides which products agents may discount; sees less per piece, original / discount / final and who gave it | gives it per item (Pending bookings), up to each item's maximum | no |
 | Customer photo | views it on the customer | takes it (required for a new customer) | no |
 
 The database checks every rule itself. The Desktop calls owner-only functions in `trimax_private`
@@ -77,17 +77,23 @@ names wrap instead of being cut. The layout tightens to keep up to about 30 line
 continue on further pages with the header repeated. Sale receipts show type, receipt number, payment
 status and method, line discounts, and VOID when voided.
 
-## Agent discounts on bookings
+## Agent discounts on bookings (per item since `20261027_04`)
 
-- The Agent can give a peso or percent discount when creating a booking, or change it while the booking
-  is Pending. The phone shows the original price, the discount and the final price.
-- **Minimum price** = for each line, quantity × (puhunan + minimum patong). The final price can never go
-  below it. If any product in the order has no puhunan, no discount is possible. The phone is told only
-  the **maximum discount**, never the puhunan.
-- The server checks the discount again when the booking is saved or changed. It records the original
-  price, discount amount, type and value, the Agent and the time. The audit log keeps "Original ₱X,
-  discount ₱Y, final ₱Z".
-- The Desktop booking details show the original price, the discount and who gave it.
+Owner's decision of 2026-10-27: the discount is **per item**, not one discount for the whole booking.
+
+- The **Admin** decides per product: Inventory → "Agents may discount this item" (off by default).
+- The **Agent** types a peso amount **off each piece** of an allowed item when creating a booking, or
+  changes it while the booking is Pending (e.g. Sprite ₱25.00, less ₱2.00 = ₱23.00 a piece; Coke stays
+  ₱25.00 when it is not allowed). The phone shows each item's maximum, the original price, the discount
+  and the final price.
+- **Limit per piece:** price − (puhunan + minimum patong). A product without puhunan, or not allowed by
+  the Admin, cannot be discounted. The phone is told only the maximum per piece, never the puhunan.
+- The server checks every line again when the booking is saved or changed (refusals: `discount_not_allowed`,
+  `discount_not_configured`, `discount_too_big`; an older app's whole-order discount gets
+  `discount_per_item_only` = "update the app"). Every change is in the audit log ("Sprite less ₱2.00 x 2").
+- The Desktop booking details show "Less / piece" and "Line total" per item; the receipt prints the
+  discount on each line; Sales & Profit counts the discounts as before (net sales = gross − discounts).
+- Bookings from before keep their totals (their lines have no discount per piece).
 
 ## Sales & Profit dashboard
 

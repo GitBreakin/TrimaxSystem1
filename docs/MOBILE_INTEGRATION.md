@@ -223,3 +223,16 @@ The server only returns and accepts the signed-in agent's own customers (`trimax
 `feature/handover-fixes` APK the phone's own saved-customer list is also per agent (owner column) and
 is deleted at logout, with the customer photos kept on the phone, so a shared phone does not show one
 agent's customers to another.
+
+## Agent discounts per item (`20261027_04`, not applied yet)
+
+| Function | What it does |
+| --- | --- |
+| `trimax_agent_discount_quote(items)` | Per product: `discount_allowed`, `max_discount_per_unit`, `reason`; plus `subtotal`, `max_discount` (sum) |
+| `trimax_agent_create_booking(..., p_items)` | Each item may carry `discount_per_unit` (pesos off one piece). A whole-order `p_discount_type/value` is refused with `discount_per_item_only` |
+| `trimax_agent_set_item_discounts(booking_id, items)` | Pending bookings: `[{"product_id", "discount_per_unit"}]`, items not listed go back to full price, `[]` removes all |
+| `trimax_agent_set_discount(...)` | Older apps: 0 removes all discounts; a new whole-order discount is refused |
+
+`booking_json` items carry `discount_per_unit` and `line_total`; `discount.type` is `PER_ITEM`. Install the
+`feature/per-item-discounts` APK the same day the update is applied: an older APK can still book at full
+price, but its discount box is refused with "Update the TRIMAX app".

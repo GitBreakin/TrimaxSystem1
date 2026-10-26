@@ -15,6 +15,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
 | `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
 | `20261027_03` Driver app: own assigned vehicle (`trimax_driver_my_vehicle`) | **Applied 2026-10-27** (about 04:05) with approval |
+| `20261027_04` agent discounts per item | **Not applied.** Needs approval (and the new APK + Desktop the same day) |
 
 ## Files (run in this order)
 
@@ -32,6 +33,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `sql/20261027_93_rollback_sales_inventory_payroll.sql` | Undoes `20261027_01`'s behaviour: puts back the previous `trimax_agent_create_booking`, `booking_json`, booking-total trigger, `issue_media_ticket` and media-ticket checks; drops the new functions, triggers and policies; keeps every new table, column and row | — |
 | `sql/20261027_02_expenses.sql` | `public.expenses` (date, category, description, amount, Paid/Unpaid with date and method, notes, void with reason, `client_request_id`) and append-only `public.expense_history` (written by a trigger; expenses cannot be deleted and a voided one cannot change). Owner-only `trimax_private.save_expense` / `void_expense` (Active Admin, audited). `profit_summary` / `profit_trend` dropped and created again with the expense columns **added at the end**; net profit = gross profit − payroll − other expenses | Adds 2 tables, 5 functions, 3 triggers; replaces the 2 report functions; changes no row |
 | `sql/20261027_03_driver_my_vehicle.sql` | `public.trimax_driver_my_vehicle()`: the signed-in driver's own assigned vehicles (plate number = `vehicles.vehicle_id`, type, status). No parameter, drivers only (agents TM403), not callable by anon or service_role | Adds 1 function; changes no row |
+| `sql/20261027_04_per_item_discounts.sql` | `products.agent_discount_allowed`, `booking_items.discount_per_unit`; per-item quote, booking, `trimax_agent_set_item_discounts`; the whole-order discount is refused (`discount_per_item_only`); `save_product` gains `p_agent_discount` (default keeps the setting) | Adds 2 columns (defaults: no change to existing rows), 4 functions; replaces 7 |
+| `sql/20261027_90_rollback_per_item_discounts.sql` | Puts back the `20261027_01` functions exactly; keeps both columns and their values | — |
 | `sql/20261027_91_rollback_driver_my_vehicle.sql` | Drops that function | — |
 | `sql/20261027_92_rollback_expenses.sql` | Undoes `20261027_02`'s behaviour: puts back the 2 report functions exactly as `20261027_01` (same body hash) and drops `save_expense` / `void_expense`; keeps both tables, their rows and their protection | — |
 | `sql/20261026_94_rollback_employee_mobile_sign_in.sql` | Undoes `20261026_01`: drops the tickets and the 4 functions and puts back the previous finish function; keeps every sign-in and link | — |

@@ -176,6 +176,18 @@ public class BookingService {
         public int quantity;
         public BigDecimal unitPrice;
         public BigDecimal subtotal;
+        /** Pesos the agent took off each piece (20261027_04; 0 before it or for none). */
+        public BigDecimal discountPerUnit = BigDecimal.ZERO;
+
+        /** quantity x discount per piece. */
+        public BigDecimal lineDiscount() {
+            return discountPerUnit.multiply(BigDecimal.valueOf(quantity));
+        }
+
+        /** What the line costs after its discount. */
+        public BigDecimal lineTotal() {
+            return (subtotal == null ? BigDecimal.ZERO : subtotal).subtract(lineDiscount());
+        }
     }
 
     /** Everything the booking detail window shows. */
@@ -212,7 +224,8 @@ public class BookingService {
         public String discountText() {
             if (!hasDiscount()) return "";
             String how = "PERCENT".equals(discountType) && discountValue != null
-                    ? discountValue.stripTrailingZeros().toPlainString() + "%" : Theme.money(discountAmount);
+                    ? discountValue.stripTrailingZeros().toPlainString() + "%"
+                    : discountType == null ? Theme.money(discountAmount) + " on items" : Theme.money(discountAmount);
             return how + (discountBy == null ? "" : " by " + discountBy);
         }
 
@@ -238,7 +251,9 @@ public class BookingService {
                 + "LEFT JOIN users u    ON u.username = b.driver_username "
                 + "LEFT JOIN vehicles v ON v.vehicle_id = b.vehicle_id "
                 + "WHERE b.booking_id = ?";
-        String lines = "SELECT p.product_name, bi.quantity, bi.unit_price, bi.subtotal "
+        // discount_per_unit read through to_jsonb so this also works on a server without 20261027_04
+        String lines = "SELECT p.product_name, bi.quantity, bi.unit_price, bi.subtotal, "
+                + "coalesce((to_jsonb(bi) ->> 'discount_per_unit')::numeric, 0) "
                 + "FROM booking_items bi LEFT JOIN products p ON p.product_id = bi.product_id "
                 + "WHERE bi.booking_id = ? ORDER BY bi.item_id";
 
@@ -271,6 +286,7 @@ public class BookingService {
                         l.quantity = rs.getInt(2);
                         l.unitPrice = rs.getBigDecimal(3);
                         l.subtotal = rs.getBigDecimal(4);
+                        l.discountPerUnit = rs.getBigDecimal(5);
                         d.items.add(l);
                     }
                 }

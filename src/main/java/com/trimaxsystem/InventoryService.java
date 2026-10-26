@@ -28,6 +28,8 @@ final class InventoryService {
         String name, supplier, imagePath, markupType;
         BigDecimal price, cost, markupValue, minMarkup;
         int stock;
+        /** Agents may discount this item (20261027_04); null when the server does not have the setting. */
+        Boolean agentDiscount;
 
         /** "₱ 12.00" or "25%" or "" when there is no patong. */
         String markupText() {
@@ -41,6 +43,7 @@ final class InventoryService {
         final List<Product> products = new ArrayList<>();
         boolean pricing;    // the products table has puhunan / patong (20261027_01)
         boolean pictures;   // the products table has image_path (20261025_06)
+        boolean itemDiscounts;   // the products table has agent_discount_allowed (20261027_04)
     }
 
     /** Products matching the keyword (id, name or supplier), by id. */
@@ -57,6 +60,7 @@ final class InventoryService {
             try (ResultSet rs = ps.executeQuery()) {
                 c.pricing = has(rs, "capital_cost") && has(rs, "min_markup");
                 c.pictures = has(rs, "image_path");
+                c.itemDiscounts = has(rs, "agent_discount_allowed");
                 while (rs.next()) {
                     Product p = new Product();
                     p.id = rs.getInt("product_id");
@@ -71,6 +75,7 @@ final class InventoryService {
                         p.markupValue = rs.getBigDecimal("markup_value");
                         p.minMarkup = rs.getBigDecimal("min_markup");
                     }
+                    if (c.itemDiscounts) p.agentDiscount = rs.getBoolean("agent_discount_allowed");
                     c.products.add(p);
                 }
             }
@@ -89,15 +94,18 @@ final class InventoryService {
     /**
      * Adds (id null) or edits a product. With a puhunan the patong is required and the database
      * calculates the selling price; without one the typed price is kept. Editing never changes stock.
+     * agentDiscount: whether agents may discount the item (null = leave it, or a server without 20261027_04).
      * @return the product id
      */
     static int save(Integer id, String name, String supplier, BigDecimal cost, String markupType,
-                    BigDecimal markupValue, BigDecimal minMarkup, BigDecimal price, Integer startingStock)
+                    BigDecimal markupValue, BigDecimal minMarkup, BigDecimal price, Integer startingStock,
+                    Boolean agentDiscount)
             throws Db.Failure {
         String admin = Db.admin();
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "select trimax_private.save_product(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+             PreparedStatement ps = conn.prepareStatement(agentDiscount == null
+                     ? "select trimax_private.save_product(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                     : "select trimax_private.save_product(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, admin);
             if (id == null) ps.setNull(2, Types.INTEGER); else ps.setInt(2, id);
             ps.setString(3, name);
@@ -108,6 +116,7 @@ final class InventoryService {
             ps.setBigDecimal(8, minMarkup == null ? BigDecimal.ZERO : minMarkup);
             ps.setBigDecimal(9, price);
             if (startingStock == null) ps.setNull(10, Types.INTEGER); else ps.setInt(10, startingStock);
+            if (agentDiscount != null) ps.setBoolean(11, agentDiscount);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getInt(1);
