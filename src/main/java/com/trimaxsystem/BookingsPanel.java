@@ -4,8 +4,6 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -24,7 +22,8 @@ import javax.swing.table.JTableHeader;
 /**
  * Bookings list: one row per booking, with search, filters (status, driver, date range), server-side
  * sorting and paging, and a detail window (see {@link BookingDetailDialog}) for status changes.
- * "Add New Booking" still opens the existing booking window.
+ * Bookings are created by Agents in the Android app (the Admin's "Add New Booking" was removed on
+ * 2026-10-27 at the owner's request; Walk-In / In-House sales are on their own page).
  *
  * Bookings created in the Android app are ordinary rows here. The Delivery column flags new mobile
  * bookings and shows the driver's progress; the list refreshes itself every 30 seconds while it is on
@@ -86,9 +85,6 @@ public class BookingsPanel extends JPanel {
     private boolean sortAsc = false;
     private int requestId = 0;                 // lets a slow, old answer be ignored
     private long totalRows = 0;
-
-    // Keeps only one "Add New Booking" window open at a time
-    private JFrame bookingFrame;
 
     // Quiet refresh while the list is on screen, so driver updates from phones show up.
     private final Timer autoRefresh = new Timer(AUTO_REFRESH_MS, e -> autoRefreshTick());
@@ -272,13 +268,9 @@ public class BookingsPanel extends JPanel {
 
         btnView.setEnabled(false);
         btnView.addActionListener(e -> openDetails());
-        JButton btnAdd = primaryButton("Add New Booking");
-        btnAdd.addActionListener(e -> openBookingWindow());
-
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         right.setOpaque(false);
         right.add(btnView);
-        right.add(btnAdd);
 
         JPanel footer = new JPanel(new BorderLayout());
         footer.setOpaque(false);
@@ -691,47 +683,6 @@ public class BookingsPanel extends JPanel {
         if (row < 0) return;
         int id = (Integer) model.getValueAt(row, COL_ID);
         new BookingDetailDialog(SwingUtilities.getWindowAncestor(this), id, this::load).setVisible(true);
-    }
-
-    // ---------- OPEN THE "BOOK FOR CLIENT" WINDOW (unchanged behaviour) ----------
-    private void openBookingWindow() {
-        // If it's already open, just bring it to the front
-        if (bookingFrame != null && bookingFrame.isDisplayable()) {
-            bookingFrame.toFront();
-            bookingFrame.requestFocus();
-            return;
-        }
-
-        bookingFrame = new JFrame("Add New Booking");
-        bookingFrame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        bookingFrame.setContentPane(new BookForClientPanel());
-
-        // Fill the usable area of the screen this window is on (excludes the taskbar)
-        GraphicsConfiguration gc = getGraphicsConfiguration();
-        Rectangle screen = gc.getBounds();
-        Insets in = Toolkit.getDefaultToolkit().getScreenInsets(gc);
-        Rectangle area = new Rectangle(
-                screen.x + in.left,
-                screen.y + in.top,
-                screen.width - in.left - in.right,
-                screen.height - in.top - in.bottom);
-
-        bookingFrame.setBounds(area);
-
-        // Lock it to that size
-        bookingFrame.setMinimumSize(area.getSize());
-        bookingFrame.setMaximumSize(area.getSize());
-        bookingFrame.setResizable(false);
-
-        // Refresh the bookings list once the window is closed
-        bookingFrame.addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosed(WindowEvent e) {
-                load();
-            }
-        });
-
-        bookingFrame.setVisible(true);
     }
 
     // =====================================================

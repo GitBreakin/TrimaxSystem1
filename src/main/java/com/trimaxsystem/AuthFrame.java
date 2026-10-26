@@ -15,7 +15,7 @@ public class AuthFrame extends JFrame {
     private boolean launching;
 
     public AuthFrame() {
-        setTitle("TRI-MAX Goods Trading Management System");
+        setTitle("TRI-MAX Consumer Goods Trading Management System");
         setIconImages(BrandLogo.createWindowIcons());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setExtendedState(JFrame.MAXIMIZED_BOTH);   // a resizable, maximized window leaves the taskbar visible
@@ -77,7 +77,7 @@ public class AuthFrame extends JFrame {
 
         String version = AuthFrame.class.getPackage() != null && AuthFrame.class.getPackage().getImplementationVersion() != null
                 ? AuthFrame.class.getPackage().getImplementationVersion() : "1.0";
-        JLabel footer = new JLabel("\u00A9 " + java.time.Year.now(Theme.BUSINESS_TZ) + " TRI-MAX Goods Trading  \u00B7  Admin Console " + version);
+        JLabel footer = new JLabel("\u00A9 " + java.time.Year.now(Theme.BUSINESS_TZ) + " TRI-MAX Consumer Goods Trading  \u00B7  Admin Console " + version);
         footer.setFont(new Font("SansSerif", Font.PLAIN, 12));
         footer.setForeground(AuthUI.MUTED);
         gbc.gridy = 1;
