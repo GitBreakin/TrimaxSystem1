@@ -74,7 +74,7 @@ It was then compared object by object with production:
 | RLS flags and table grants (19 tables) | **identical** |
 | Legacy Desktop tables (`users`, `bookings`, `clients`, …) | now in `sql/20261026_00_legacy_tables_from_production.sql` (written from production's catalog). A database built only from the repository files is **identical** to production: 80/80 schema fingerprints (`sql/tests/rebuild_check.sh`). |
 | Edge Function `trimax-admin-media` | v1 matched repo `5db009c`; **v2 deployed 2026-10-26** = repo `handler.ts` (sha256 identical) |
-| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, and `_06` (2026-10-26, with approval). `_07` is **not applied**. |
+| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, `_06` (2026-10-26), `20261026_01` (2026-10-26) and `20261027_01` (2026-10-27), all with approval. `_07` is **not applied**. |
 
 ### Waiting for separate approval (in this order)
 

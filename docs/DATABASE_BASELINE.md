@@ -12,7 +12,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Applied and deployed 2026-10-26**, with the owner's approval |
 | `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
-| `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Not applied.** Needs approval (see [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md)) |
+| `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
 
 ## Files (run in this order)
 
@@ -128,9 +128,12 @@ The live upload check (a real picture through the function) is done from the Des
 Tests: `sql/tests/42_product_images_tests.sql` (26 checks + rollback/re-apply) and the Edge Function tests
 (21 checks, including upload and delete).
 
-### `20261027_01` (sales, stock, payroll, customer photos, discounts): not applied
+### `20261027_01` (sales, stock, payroll, customer photos, discounts): applied 2026-10-27
 
-Waiting for approval. Order: back up → apply `20261027_01` → redeploy `trimax-admin-media` (adds
+Applied with the owner's approval as `20261027_01_sales_inventory_payroll_part1..3` (sections 1-5, 6, 7-11;
+each part carries the privileges of what it creates). Before: production's schema equalled the repository
+rebuild (84/84) and a dry run on a copy of production's rows changed no value. After: 100/100 fingerprints
+equal a database built from the file, and no existing value changed. Order that was followed: back up → apply `20261027_01` → redeploy `trimax-admin-media` (adds
 `customer-photos` to the buckets the Admin may view) → install the Desktop build → give Agents the new
 APK the same day (an older APK cannot add a new customer once the photo is required). Details, rules and
 rollback: [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).

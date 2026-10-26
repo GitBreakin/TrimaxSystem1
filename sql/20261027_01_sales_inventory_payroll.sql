@@ -35,7 +35,11 @@
 --  11. privileges: new tables are invisible to the API roles; Desktop functions are owner-only
 --
 -- ORDER: after 20261026_01. Re-runnable. Rollback: 20261027_93_rollback_sales_inventory_payroll.sql.
--- NOT applied to production yet: needs the owner's approval.
+-- APPLIED to production on 2026-10-27 (about 02:45 Asia/Manila) with the owner's approval, in three
+-- transactions (sections 1-5, 6 and 7-11, each with the privileges of what it creates). Checked afterwards:
+-- production's schema equals a database built from this file (100/100 fingerprints, including function
+-- bodies and privileges), and no existing product, booking, booking line, client or agent value changed.
+-- Edge Function trimax-admin-media v3 deployed the same night.
 -- =====================================================================================================
 
 begin;

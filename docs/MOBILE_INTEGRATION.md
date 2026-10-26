@@ -169,9 +169,9 @@ Use test accounts: one Agent (or Rider), two Drivers each with an `Available` ve
     `/rest/v1/bookings` must return an error, not rows; `POST /rest/v1/rpc/trimax_driver_list_deliveries`
     without a user token must be refused.
 
-## Customer photos and agent discounts (`20261027_01`, not applied yet)
+## Customer photos and agent discounts (`20261027_01`, live since 2026-10-27)
 
-Needs approval; full rules in [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
+Applied with approval; agents need the new APK (an older one cannot add a new customer). Full rules in [SALES_PROFIT_PAYROLL.md](SALES_PROFIT_PAYROLL.md).
 
 | Phone call | What the server does |
 | --- | --- |

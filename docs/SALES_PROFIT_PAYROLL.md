@@ -5,8 +5,10 @@ Everything below needs `sql/20261027_01_sales_inventory_payroll.sql` on the serv
 the Desktop keeps working as before: Inventory uses the old product form, and the new screens say
 "needs the database update 20261027_01".
 
-**Production status: not applied. Needs the owner's approval** (with a redeploy of the Edge Function
-`trimax-admin-media`, so the Admin can open customer photos).
+**Production status: applied on 2026-10-27 (about 02:45 Manila) with the owner's approval**, and the Edge
+Function `trimax-admin-media` redeployed (v3) so the Admin can open customer photos. Checked afterwards:
+production's schema equals a database built from the file (100/100 fingerprints); no existing product,
+booking, line, customer or agent value changed. Next: install the new APK on every Agent's phone today.
 
 ## Who can do what
 
