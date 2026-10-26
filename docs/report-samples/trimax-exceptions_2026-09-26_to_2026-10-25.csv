@@ -1,0 +1,15 @@
+﻿TRI-MAX report,Exceptions
+"Period (Asia/Manila, both dates included)",2026-09-26 to 2026-10-25
+Generated for,unknown
+Generated at,2026-10-25 23:24 (Asia/Manila)
+Definition,"bookings are counted once, on the day created. Completion rate = Completed / all created; Cancellation rate = Cancelled / all created; n/a when nothing was created."
+"Alerts = SOS and problem reports sent from the mobile app, by the day they were sent."
+
+Exception,Count,Where to look
+Alert: SOS,1,Notifications
+Alert: Delivery problem,3,Notifications
+Alert: Vehicle problem,1,Notifications
+Alerts not resolved yet,2,Notifications (Open alerts)
+Failed deliveries,2,Bookings (delivery status FAILED)
+Cancelled bookings,4,Bookings (status Cancelled)
+Waiting for confirmation,4,Bookings (status Pending)

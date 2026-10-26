@@ -82,7 +82,7 @@ public class RegisterPanel extends JPanel {
         lblAlreadyHave.setFont(new Font("SansSerif", Font.PLAIN, 12));
         lblAlreadyHave.setForeground(Color.decode("#334155"));
 
-        JButton btnReturnLogin = AuthUI.button("Return to Login", 130, 34, 12, Font.PLAIN);
+        JButton btnReturnLogin = AuthUI.secondary(AuthUI.button("Return to Login", 130, 34, 12, Font.PLAIN));
         btnReturnLogin.addActionListener(e -> parentFrame.showCard("LOGIN"));
 
         bottomNavPanel.add(lblAlreadyHave, BorderLayout.WEST);

@@ -1,0 +1,12 @@
+﻿TRI-MAX report,"Bookings per driver (counts only, not a ranking)"
+"Period (Asia/Manila, both dates included)",2026-09-26 to 2026-10-25
+Generated for,unknown
+Generated at,2026-10-25 23:24 (Asia/Manila)
+Definition,"bookings are counted once, on the day created. Completion rate = Completed / all created; Cancellation rate = Cancelled / all created; n/a when nothing was created."
+Delivered / Failed = the driver's delivery result. Average start to delivered,"from the server's delivery events, only bookings that have both (number of bookings in brackets)."
+
+Driver,Username,Assigned,Delivered,Failed,Completed,Cancelled,Open,Avg start to delivered
+Dan Reyes,dan,18,15,2,14,1,1,45 min (14)
+Mark Santos,mark,14,11,1,10,2,2,62 min (10)
+Jo Cruz,jo,9,4,0,4,1,4,38 min (4)
+No driver assigned,,6,0,0,0,0,6,'-

@@ -22,6 +22,13 @@
             <version>42.7.3</version>
         </dependency>
 
+        <!-- SMTP email delivery for password setup and reset codes -->
+        <dependency>
+            <groupId>com.sun.mail</groupId>
+            <artifactId>javax.mail</artifactId>
+            <version>1.6.2</version>
+        </dependency>
+
         <!-- Your existing dependencies (like FlatLaf which is already in your project) -->
         <dependency>
             <groupId>com.formdev</groupId>
@@ -35,6 +42,30 @@
             <version>2.0.31</version>
         </dependency>
 
+        <!-- Excel (.xlsx) export for reports -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>

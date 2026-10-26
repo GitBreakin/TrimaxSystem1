@@ -26,12 +26,7 @@ public final class AuthService {
     // SETTINGS
     // =====================================================
 
-    /**
-     * DEVELOPMENT ONLY. While true, the password-reset code is shown on screen (and printed to the
-     * console) because no email sender is connected yet. Set it to false once sendResetCode() below
-     * really sends the code by email, otherwise anyone could reset any account's password.
-     */
-    public static final boolean DEV_SHOW_RESET_CODE = true;
+    public static final boolean DEV_SHOW_RESET_CODE = false;
 
     private static final String ADMIN_ROLE          = "Admin";
     private static final int    MAX_FAILED_ATTEMPTS = 5;     // wrong passwords before a temporary lock
@@ -335,9 +330,51 @@ public final class AuthService {
      *
      * @return the code only while DEV_SHOW_RESET_CODE is true (otherwise null)
      */
+    /**
+     * Creates a one-time password setup code within the caller's transaction, then emails it.
+     * If delivery fails, the caller can roll back both the employee and reset-code rows.
+     */
+    static void createEmployeeSetupCode(Connection conn, String username, String email, String fullName)
+            throws SQLException, AuthException {
+        if (!EmailService.isConfigured()) {
+            throw new AuthException(EmailService.notSetUpMessage("the new employee cannot be sent a setup code")
+                    + "\nNothing was saved.");
+        }
+
+        StringBuilder code = new StringBuilder();
+        for (int i = 0; i < CODE_LENGTH; i++) {
+            code.append(CODE_CHARS.charAt(RANDOM.nextInt(CODE_CHARS.length())));
+        }
+
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM password_resets WHERE username = ?")) {
+            ps.setString(1, username);
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO password_resets (username, code_hash, expires_at) "
+                        + "VALUES (?, ?, now() + make_interval(mins => ?))")) {
+            ps.setString(1, username);
+            ps.setString(2, sha256Hex(code.toString()));
+            ps.setInt(3, RESET_MINUTES);
+            ps.executeUpdate();
+        }
+
+        try {
+            EmailService.sendSetupCode(email, fullName, username, code.toString());
+        } catch (Exception e) {
+            String reason = EmailService.explain(e);
+            System.err.println("Failed to send employee setup email: " + e.getClass().getSimpleName() + ": " + reason);
+            throw new AuthException("The setup email could not be sent, so the account was not created.\n" + reason
+                    + "\nYou can check the email settings with System Settings > Email > Send test email.", e);
+        }
+    }
+
     public static String requestPasswordReset(String emailOrUsername) throws AuthException {
         String id = emailOrUsername == null ? "" : emailOrUsername.trim();
         if (id.isEmpty()) throw new AuthException("Please enter your email address or username.");
+        if (!EmailService.isConfigured()) {
+            throw new AuthException("Email delivery is not configured. Please contact the TRIMAX administrator.");
+        }
 
         try (Connection conn = DatabaseConnection.getConnection()) {
             String[] user = findUser(conn, id);     // {username, name, email} or null
@@ -363,22 +400,45 @@ public final class AuthService {
                 ps.setString(1, user[0]);
                 ps.executeUpdate();
             }
+
+            String codeHash = sha256Hex(code.toString());
+
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO password_resets (username, code_hash, expires_at) "
                             + "VALUES (?, ?, now() + make_interval(mins => ?))")) {
                 ps.setString(1, user[0]);
-                ps.setString(2, sha256Hex(code.toString()));
+                ps.setString(2, codeHash);
                 ps.setInt(3, RESET_MINUTES);
                 ps.executeUpdate();
             }
 
-            sendResetCode(user[2], user[1], code.toString());
+            try {
+                sendResetCode(user[2], user[1], code.toString());
+            } catch (AuthException emailError) {
+                // Remove only the reset code created by this request.
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM password_resets WHERE username = ? AND code_hash = ?")) {
+                    ps.setString(1, user[0]);
+                    ps.setString(2, codeHash);
+                    ps.executeUpdate();
+                } catch (SQLException cleanupError) {
+                    emailError.addSuppressed(cleanupError);
+                }
+
+                System.err.println("Password reset email delivery failed.");
+                emailError.printStackTrace();
+
+                throw new AuthException(
+                        "The password reset email could not be sent. Please try again later.",
+                        emailError
+                );
+            }
+
             return DEV_SHOW_RESET_CODE ? code.toString() : null;
         } catch (SQLException e) {
             throw db(e);
         }
     }
-
     /**
      * Step 2 of "forgot password": checks the code and sets the new password.
      * All remembered sessions of that account are ended.
@@ -501,15 +561,15 @@ public final class AuthService {
         return letter && digit ? null : "Password must contain at least one letter and one number.";
     }
 
-    /**
-     * Delivers the reset code to the user. NOT CONNECTED YET: add your email sending here
-     * (SMTP, SendGrid, Resend, ...) and then set DEV_SHOW_RESET_CODE to false.
-     */
-    private static void sendResetCode(String email, String fullName, String code) {
-        if (DEV_SHOW_RESET_CODE) {
-            System.out.println("[DEV] Password reset code for " + email + ": " + code);
+    /** Emails the reset code to the user (SMTP settings: see EmailService). */
+    private static void sendResetCode(String email, String fullName, String code) throws AuthException {
+        try {
+            EmailService.sendSetupCode(email, fullName, "", code);
+        } catch (Exception e) {
+            // The person resetting only gets a general message; the reason is for whoever runs this PC.
+            System.err.println("Password reset email not sent: " + EmailService.explain(e));
+            throw new AuthException("The password reset email could not be sent. Please try again later.", e);
         }
-        // TODO: send "code" to "email" here.
     }
 
     // =====================================================
