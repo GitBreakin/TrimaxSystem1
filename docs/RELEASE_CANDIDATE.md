@@ -91,7 +91,7 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | Desktop: report export equals screen, every tab and grouping | 111/111 |
 | Desktop: password securing SQL on a test DB (compare-and-set, login still works, wrong password refused) | passed |
 | Android: 12 of 13 unit-test classes (stand-ins for Android classes) | 46/46 passed |
-| Android on Lance's laptop (real SDK): `gradlew testDebugUnitTest` on `release/rc-1` (`f930545`, before the `ed5b7d5` port) | BUILD SUCCESSFUL |
+| Android on Lance's laptop (real SDK): `gradlew testDebugUnitTest` on `release/rc-1` `fa49ed1` (includes the `ed5b7d5` port), then `installDebug` on his phone (LAB-LX2) | BUILD SUCCESSFUL, installed (2026-10-26) |
 | Android: `SupabaseClientTest` (needs OkHttp MockWebServer from Gradle) | **not run here** |
 | Secret scan, all branches and history, both repos | P0-1 and P0-2 above; nothing else (only the publishable key and placeholders) |
 | Branch ancestry and merge dry-run into `master` | both RCs contain `master` |
@@ -103,7 +103,8 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 
 **Repository hygiene (both PCs, before anything is merged)**
 
-- [ ] Laptop `C:\Users\lance\AndroidStudioProjects\TRIMAX2` and Gigabyte `C:\Users\Gigabyte\IdeaProjects\TrimaxSystem1`:
+- [x] Laptop `C:\Users\lance\AndroidStudioProjects\TRIMAX2` (2026-10-26: only `.idea/deploymentTargetSelector.xml` changed, 4 old stashes kept, nothing unpushed after `fix/driver-started-delivered` was pushed).
+- [ ] Gigabyte `C:\Users\Gigabyte\IdeaProjects\TrimaxSystem1`:
   `git fetch origin`, `git status --short`, `git stash list`, `git log --branches --not --remotes --oneline`.
   Nothing unpushed. Stashes, `receipts/` and IDE files are kept as they are.
 
@@ -120,7 +121,7 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 
 **Android (physical phone, `release/rc-1`)**
 
-- [ ] `.\gradlew.bat test` passes; `.\gradlew.bat installDebug`.
+- [x] `.\gradlew.bat testDebugUnitTest` passes and `.\gradlew.bat installDebug` installs on the phone (`fa49ed1`, 2026-10-26).
 - [ ] Agent: sign in, create booking with a map pin, see it in Desktop; price list pictures (after `_06`).
 - [ ] Driver: duty start/end with photo and GPS; Start delivery → Delivered with proof photo, or Mark failed with a note.
 - [ ] SOS and problem report reach Desktop Notifications; offline report is sent later once.
