@@ -91,6 +91,7 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | Desktop: report export equals screen, every tab and grouping | 111/111 |
 | Desktop: password securing SQL on a test DB (compare-and-set, login still works, wrong password refused) | passed |
 | Android: 12 of 13 unit-test classes (stand-ins for Android classes) | 46/46 passed |
+| Desktop RC on Lance's laptop against production: an Attendance duty photo opened (2026-10-26 10:50; server shows the one-time ticket used and audit `media.view` success, so Desktop -> ticket -> Edge Function v2 -> Storage works end to end) | passed |
 | Android on Lance's laptop (real SDK): `gradlew testDebugUnitTest` on `release/rc-1` `fa49ed1` (includes the `ed5b7d5` port), then `installDebug` on his phone (LAB-LX2) | BUILD SUCCESSFUL, installed (2026-10-26) |
 | Android: `SupabaseClientTest` (needs OkHttp MockWebServer from Gradle) | **not run here** |
 | Secret scan, all branches and history, both repos | P0-1 and P0-2 above; nothing else (only the publishable key and placeholders) |
