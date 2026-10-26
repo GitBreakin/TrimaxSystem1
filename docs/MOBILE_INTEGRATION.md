@@ -206,3 +206,20 @@ desktop works before, during and after either part.
 * The desktop still connects as the database owner with a password in `trimax.properties` on each admin
   PC. That is a separate risk: a dedicated least-privilege database role, or moving admin writes behind a
   server, is recommended before handing the desktop to more people.
+
+
+## Driver: assigned vehicle (`20261027_03`, not applied yet)
+
+`public.trimax_driver_my_vehicle()` returns `{"vehicles":[{"plate_number","vehicle_type","status"}],"checked_at"}`
+for the signed-in driver only (the driver comes from the sign-in; there is no parameter). The Driver
+profile calls it each time it is shown, so an Admin's change of type or plate number on Manage Vehicles
+appears without reinstalling. Empty list = "No vehicle assigned". Offline: the last answer for this
+sign-in is shown, marked as not current. Tests: `sql/tests/47_driver_vehicle_tests.sql`.
+
+## Agent: customers on the phone
+
+The server only returns and accepts the signed-in agent's own customers (`trimax_agent_list_customers`,
+`trimax_agent_save_customer`, `trimax_agent_create_booking`; tests 10, 45, 47). From the
+`feature/handover-fixes` APK the phone's own saved-customer list is also per agent (owner column) and
+is deleted at logout, with the customer photos kept on the phone, so a shared phone does not show one
+agent's customers to another.
