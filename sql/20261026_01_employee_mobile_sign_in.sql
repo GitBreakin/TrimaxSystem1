@@ -255,7 +255,7 @@ end $function$;
 -- called until now): it wrote audit rows as actor 'provisioning', but production's audit_log has
 -- audit_log_actor_username_fkey (actor must be a TRIMAX user), so every call failed and rolled back.
 -- Same function, same checks and answers; only the audit actor is now the admin who asked (or the
--- account itself). Found by the local end-to-end test on a production-identical schema.
+-- account itself), and the service-role check is the one the photo/ticket functions use. Found by the local end-to-end test on a production-identical schema.
 CREATE OR REPLACE FUNCTION public.trimax_service_finish_provisioning(p_request_id bigint, p_outcome text, p_auth_user_id uuid DEFAULT NULL::uuid, p_message text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -273,7 +273,8 @@ declare
     v_other text;
     v_actor text;
 begin
-    if not trimax_private.is_service_request() then
+    -- Same service check as the photo and ticket functions (works with legacy and new secret keys).
+    if not (trimax_private.is_service_request() or current_setting('role', true) = 'service_role') then
         raise exception using errcode = 'TM403', message = 'Not allowed.';
     end if;
     if v_outcome not in ('invited', 'linked', 'failed') then
