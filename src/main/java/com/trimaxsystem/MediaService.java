@@ -30,6 +30,7 @@ public final class MediaService {
 
     public static final String DUTY_PHOTOS = "duty-photos";
     public static final String DELIVERY_PROOFS = "delivery-proofs";
+    public static final String CUSTOMER_PHOTOS = "customer-photos";
     private static final String FUNCTION = "/functions/v1/trimax-admin-media";
     private static final int MAX_BYTES = 8 * 1024 * 1024;
     private static final Pattern ERROR_TEXT = Pattern.compile("\"error\"\\s*:\\s*\"([^\"]{1,300})\"");
@@ -54,6 +55,13 @@ public final class MediaService {
     public static final class MediaException extends Exception {
         public MediaException(String message) {
             super(message);
+        }
+    }
+
+    /** The photo if it was opened recently, else null (never downloads; safe on the Swing thread). */
+    public static BufferedImage cached(String bucket, String path) {
+        synchronized (CACHE) {
+            return CACHE.get(bucket + "/" + path);
         }
     }
 

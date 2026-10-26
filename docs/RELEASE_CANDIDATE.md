@@ -74,7 +74,7 @@ It was then compared object by object with production:
 | RLS flags and table grants (19 tables) | **identical** |
 | Legacy Desktop tables (`users`, `bookings`, `clients`, …) | now in `sql/20261026_00_legacy_tables_from_production.sql` (written from production's catalog). A database built only from the repository files is **identical** to production: 80/80 schema fingerprints (`sql/tests/rebuild_check.sh`). |
 | Edge Function `trimax-admin-media` | v1 matched repo `5db009c`; **v2 deployed 2026-10-26** = repo `handler.ts` (sha256 identical) |
-| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, and `_06` (2026-10-26, with approval). `_07` is **not applied**. |
+| Applied migrations on live | `_02`, `_03`, `_04`, `_05`, `_06` (2026-10-26), `20261026_01` (2026-10-26) and `20261027_01` (2026-10-27), all with approval. `_07` is **not applied**. |
 
 ### Waiting for separate approval (in this order)
 
@@ -83,7 +83,14 @@ It was then compared object by object with production:
 3. Running "Secure them now" once (P1-1). It changes 7 stored values.
 4. ~~`20261026_01_employee_mobile_sign_in.sql`, then deploy the Edge Function `trimax-accounts` (verify_jwt = false) (P1-3).~~ **Done 2026-10-26 13:49** with approval. Verified: the 5 function checksums equal the tested files, grants (service role only), no row counts changed, advisors unchanged except the new ticket table (INFO).
 
-Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A keeps resolutions).
+5. `20261027_01_sales_inventory_payroll.sql`, then redeploy `trimax-admin-media` (customer photos), then
+   the Desktop build and the new APK on the same day (client requirements: products/puhunan/patong,
+   restock and stock history, Walk-In/In-House sales, Sales & Profit, payroll, customer photos, agent
+   discounts). Branches `feature/sales-profit-payroll` (Desktop) and `feature/customer-photo-discounts`
+   (Android). See `SALES_PROFIT_PAYROLL.md`.
+
+Rollbacks: `_96` (Stage F, part A keeps pictures), `_95` (Stage G, part A keeps resolutions) and
+`20261027_93` (keeps every sale, payroll record, stock movement and photo).
 
 ## Tests run for this RC (cloud workspace)
 
@@ -100,6 +107,10 @@ Rollbacks: `_96` (Stage F, part A keeps pictures) and `_95` (Stage G, part A kee
 | Desktop RC on Lance's laptop against production: an Attendance duty photo opened (2026-10-26 10:50; server shows the one-time ticket used and audit `media.view` success, so Desktop -> ticket -> Edge Function v2 -> Storage works end to end) | passed |
 | Android on Lance's laptop (real SDK): `gradlew testDebugUnitTest` on `release/rc-1` `fa49ed1` (includes the `ed5b7d5` port), then `installDebug` on his phone (LAB-LX2) | BUILD SUCCESSFUL, installed (2026-10-26) |
 | Android: `SupabaseClientTest` (needs OkHttp MockWebServer from Gradle) | **not run here** |
+| Client requirements, database (`run_tests.sh` with `45_sales_inventory_payroll_tests.sql`, rollback + re-apply), 2026-10-26 | ALL DATABASE TESTS PASSED (472 checks) |
+| Client requirements, Edge Function `trimax-admin-media` with customer photos | 22/22 |
+| Client requirements, Desktop: compiled with local PDFBox 2.0.31 + POI stand-ins; unit tests; screen tests against a demo database (sale, void, restock, payroll, discount, receipts) | 59/59 unit, 24/24 screen checks |
+| Client requirements, Android: whole app type-checked against `android.jar` (API 34) with stand-ins for AndroidX/Material (map screens excluded); unit tests with JUnit 4.13.2 and real org.json (`SupabaseClientTest` excluded) | compiled; 82/82 passed |
 | Secret scan, all branches and history, both repos | P0-1 and P0-2 above; nothing else (only the publishable key and placeholders) |
 | Branch ancestry and merge dry-run into `master` | both RCs contain `master` |
 
@@ -135,6 +146,18 @@ Not run here (no Android SDK, no Maven Central, no Windows, no phone): `gradlew 
 - [ ] SOS and problem report reach Desktop Notifications; offline report is sent later once.
 - [ ] Reports screen: periods, "n/a" with no bookings, CSV opens in Excel without formulas.
 - [ ] Theme (light/dark), bottom navigation glass looks right (P2-1), notifications, navigation.
+
+**Client requirements (after `20261027_01` + `trimax-admin-media` redeploy, approval first)**
+
+- [ ] Inventory: add a product with puhunan + patong (amount, then percent): the price follows; editing never changes stock.
+- [ ] Restock 10 with a unit cost; Adjust −1 with a reason; Stock history shows both with before/after.
+- [ ] New sale: Walk-In with 2 products, a line discount, Cash; receipt (A4 landscape, Cashier + Client copy); stock goes down.
+- [ ] In-House sale for a customer, Unpaid → Mark as paid. Void a sale: stock comes back, history shows VOID.
+- [ ] Sales & Profit: Today / Yesterday / Last 7 days / month / year / custom; numbers match the sales above; export CSV, Excel, PDF.
+- [ ] Payroll: add, edit, mark paid, void with reason; the period's payroll appears in profit.
+- [ ] Phone: add a customer with a camera photo, and one with a gallery photo; the photo opens on the Desktop customer.
+- [ ] Phone: booking with a discount within the limit is saved (Desktop shows original / discount / final); one over the limit is refused with the maximum; a product without puhunan allows no discount.
+- [ ] Phone: an older customer shows the placeholder; Add photo works.
 
 **Cross-platform**
 

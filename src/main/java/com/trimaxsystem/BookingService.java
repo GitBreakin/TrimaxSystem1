@@ -114,7 +114,8 @@ public class BookingService {
                     }
                 }
 
-                // 3. Insert each item under that booking_id and deduct the stock
+                // 3. Insert each item under that booking_id and deduct the stock (labelled for the stock history)
+                Db.stockContext(conn, "BOOKING", "booking", String.valueOf(bookingId));
                 try (PreparedStatement ins = conn.prepareStatement(
                         "INSERT INTO booking_items (booking_id, product_id, quantity, unit_price, subtotal) "
                                 + "VALUES (?, ?, ?, ?, ?)");
@@ -198,6 +199,23 @@ public class BookingService {
         public String deliveryStatus;                  // see DeliveryStatus
         public Timestamp deliveryStatusAt;
 
+        // Agent discount (sql/20261027_01; null / zero before it and for bookings without a discount)
+        public BigDecimal subtotal, discountAmount, discountValue;
+        public String discountType, discountBy;
+        public Timestamp discountAt;
+
+        public boolean hasDiscount() {
+            return discountAmount != null && discountAmount.signum() > 0;
+        }
+
+        /** "10%" or "₱ 20.00" (as the agent typed it) and who gave it. */
+        public String discountText() {
+            if (!hasDiscount()) return "";
+            String how = "PERCENT".equals(discountType) && discountValue != null
+                    ? discountValue.stripTrailingZeros().toPlainString() + "%" : Theme.money(discountAmount);
+            return how + (discountBy == null ? "" : " by " + discountBy);
+        }
+
         public boolean fromMobile() {
             return "mobile".equals(createdVia);
         }
@@ -278,6 +296,23 @@ public class BookingService {
                     }
                 }
             }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT (to_jsonb(b) ->> 'subtotal_amount')::numeric, (to_jsonb(b) ->> 'discount_amount')::numeric, "
+                            + "to_jsonb(b) ->> 'discount_type', (to_jsonb(b) ->> 'discount_value')::numeric, "
+                            + "to_jsonb(b) ->> 'discount_by', (to_jsonb(b) ->> 'discount_at')::timestamptz "
+                            + "FROM bookings b WHERE b.booking_id = ?")) {
+                ps.setInt(1, bookingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        d.subtotal = rs.getBigDecimal(1);
+                        d.discountAmount = rs.getBigDecimal(2);
+                        d.discountType = rs.getString(3);
+                        d.discountValue = rs.getBigDecimal(4);
+                        d.discountBy = rs.getString(5);
+                        d.discountAt = rs.getTimestamp(6);
+                    }
+                }
+            }
             try {
                 d.history = AuditService.load(conn, "booking", String.valueOf(bookingId));
             } catch (SQLException e) {
@@ -314,6 +349,7 @@ public class BookingService {
                     }
                 }
                 if (BookingStatus.CANCELLED.equals(newStatus)) {
+                    Db.stockContext(conn, "BOOKING_CANCELLED", "booking", String.valueOf(bookingId));
                     try (PreparedStatement ps = conn.prepareStatement(
                             "UPDATE products p SET stock = p.stock + s.qty FROM ("
                                     + "SELECT product_id, SUM(quantity) AS qty FROM booking_items "

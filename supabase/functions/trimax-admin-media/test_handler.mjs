@@ -13,6 +13,7 @@ const server = http.createServer((req, res) => {
       if (mode === "upload") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"product-images","path":"products/7/abc123.jpg","action":"upload"}'); }
       if (mode === "delete" || mode === "delete-gone") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"product-images","path":"products/7/old999.jpg","action":"delete"}'); }
       if (mode === "expired") { res.writeHead(400, { "Content-Type": "application/json" }); return res.end('{"code":"TM403","message":"expired"}'); }
+      if (mode === "customer") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"customer-photos","path":"00000000-0000-0000-0000-00000000a0a0/customer_1761460000000_ab12.jpg","action":"view"}'); }
       if (mode === "weird") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end('{"bucket":"other","path":"x/../y.jpg"}'); }
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end('{"bucket":"duty-photos","path":"00000000-0000-0000-0000-00000000d0d0/start_1_ab.jpg"}');
@@ -57,6 +58,11 @@ seen.length = 0;
 r = await handle(post(JSON.stringify({ ticket: T }))); await r.arrayBuffer();
 check(r.status === 200 && seen.every((s) => s.apikey === "eyJlegacy.jwt.key" && s.auth === "Bearer eyJlegacy.jwt.key"), "legacy service_role key also works (apikey + Bearer)");
 
+mode = "customer"; seen.length = 0;
+r = await handle(post(JSON.stringify({ ticket: T })));
+const cbytes = Buffer.from(await r.arrayBuffer());
+check(r.status === 200 && cbytes.equals(JPEG) && seen[1].url === "/storage/v1/object/customer-photos/00000000-0000-0000-0000-00000000a0a0/customer_1761460000000_ab12.jpg",
+      "customer photo (20261027_01): a view ticket returns exactly that photo");
 mode = "expired"; seen.length = 0;
 r = await handle(post(JSON.stringify({ ticket: T })));
 check(r.status === 403 && (await r.json()).error.includes("expired") && seen.length === 1, "used or expired ticket: 403, storage never touched");

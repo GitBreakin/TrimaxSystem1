@@ -227,6 +227,9 @@ public class AuthFrame extends JFrame {
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new AuthFrame());
+        SwingUtilities.invokeLater(() -> {
+            Laf.install();   // modern light look; falls back to the default Swing look if FlatLaf is missing
+            new AuthFrame();
+        });
     }
 }

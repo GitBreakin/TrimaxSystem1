@@ -14,35 +14,51 @@ import java.util.Map;
 import java.util.Set;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 /**
- * Products: details, stock and (Stage F) the product picture that agents see in the mobile app.
- * A picture is chosen and previewed first, then saved together with Add product / Update product.
+ * Inventory: products with puhunan (capital cost), patong (markup) and the selling price, stock,
+ * restocking with its purchase cost, stock corrections with a reason, the full stock history, and
+ * (Stage F) the product picture agents see in the mobile app.
+ *
+ * Selling price = puhunan + patong (a peso amount or a percent of the puhunan); the database keeps
+ * it that way. Editing a product never changes its stock: stock only moves through Restock, Correct
+ * stock, bookings and sales, and every move is in the Stock history tab.
  */
 public class InventoryPanel extends JPanel {
 
-    // Table columns
-    private static final int COL_PICTURE = 0, COL_ID = 1, COL_NAME = 2, COL_SUPPLIER = 3, COL_PRICE = 4,
-            COL_STOCK = 5, COL_STATUS = 6;
+    private static final int COL_PICTURE = 0, COL_ID = 1, COL_NAME = 2, COL_SUPPLIER = 3, COL_COST = 4,
+            COL_MARKUP = 5, COL_PRICE = 6, COL_STOCK = 7, COL_STATUS = 8;
     private static final int THUMB = 36, PREVIEW = 96;
+    private static final String[] MARKUP_TYPES = {"₱ amount", "% of puhunan"};
 
     private final DefaultTableModel inventoryTable;
     private final JTable table;
 
     private final JTextField txtProduct = new JTextField(16);
     private final JTextField txtSupplier = new JTextField(16);
-    private final JTextField txtPrice = new JTextField(10);
-    private final JTextField txtStock = new JTextField(10);
+    private final JTextField txtCost = new JTextField(8);
+    private final JComboBox<String> cmbMarkupType = new JComboBox<>(MARKUP_TYPES);
+    private final JTextField txtMarkup = new JTextField(6);
+    private final JTextField txtPrice = new JTextField(8);
+    private final JTextField txtMinMarkup = new JTextField(8);
+    private final JTextField txtStock = new JTextField(8);
+    private final JLabel lblStockCaption = UiKit.caption("Starting stock");
+    private final JLabel lblPricing = new JLabel(" ");
+    private final JLabel lblServerNote = new JLabel(" ");
     private final JTextField txtSearch = new JTextField(20);
     private final JComboBox<String> cmbFilter =
             new JComboBox<>(new String[]{"All stock levels", "High", "Moderate", "Low", "Critical", "Out"});
-    private final JLabel lblCount;
+    private final JLabel lblCount = new JLabel(" ");
 
     // Product ID of the currently selected row (null = nothing selected)
     private String selectedProductId;
+    private final Map<String, InventoryService.Product> products = new HashMap<>();
+    private boolean pricingSupported;
 
     // Pictures: what the database has, and what the admin has chosen but not saved yet
     private final Map<String, String> imagePaths = new HashMap<>();
@@ -52,151 +68,350 @@ public class InventoryPanel extends JPanel {
     private byte[] pendingJpeg;
     private boolean pendingRemove;
     private boolean imageBusy;
+    private boolean saving;
     private int previewSeq;
     private final JLabel preview = new JLabel("", SwingConstants.CENTER);
     private final JLabel imageStatus = new JLabel(" ");
     private final JProgressBar imageProgress = new JProgressBar();
     private final JButton btnChooseImage = UiKit.secondaryButton("Choose picture...");
     private final JButton btnRemoveImage = UiKit.secondaryButton("Remove picture");
-    private JButton btnAdd, btnUpdate, btnDelete, btnClear;
+    private JButton btnAdd, btnUpdate, btnDelete, btnClear, btnRestock, btnAdjust;
+
+    private final StockHistoryPanel historyPanel = new StockHistoryPanel();
+    private final JTabbedPane tabs = new JTabbedPane();
 
     public InventoryPanel() {
         setBackground(Theme.BACKGROUND);
-        setLayout(new BorderLayout(0, 12));
-        setBorder(new EmptyBorder(14, 20, 16, 20));
+        setLayout(new BorderLayout());
+        setBorder(new EmptyBorder(12, 20, 16, 20));
 
+        JPanel productsTab = new JPanel(new BorderLayout(0, 12));
+        productsTab.setOpaque(false);
+        productsTab.setBorder(new EmptyBorder(10, 0, 0, 0));
         JPanel controls = new JPanel();
         controls.setOpaque(false);
         controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
         controls.add(buildProductCard());
         controls.add(Box.createVerticalStrut(10));
         controls.add(buildSearchCard());
-        add(controls, BorderLayout.NORTH);
+        productsTab.add(controls, BorderLayout.NORTH);
 
-        String[] columnNames = {"Picture", "Product ID", "Product", "Supplier", "Price", "Stock", "Status"};
+        String[] columnNames = {"Picture", "ID", "Product", "Supplier", "Puhunan", "Patong", "Price", "Stock", "Status"};
         inventoryTable = new DefaultTableModel(null, columnNames) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
             }
         };
-
         table = new JTable(inventoryTable);
-        styleTable();
-        for (int i = 0; i < columnNames.length; i++) {
-            table.getColumnModel().getColumn(i).setPreferredWidth(100);
-        }
-        table.getColumnModel().getColumn(COL_PICTURE).setPreferredWidth(60);
+        UiKit.styleTable(table, 44);
+        table.setAutoCreateRowSorter(true);
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        int[] widths = {60, 50, 220, 160, 90, 80, 90, 70, 110};
+        for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getColumnModel().getColumn(COL_PICTURE).setMaxWidth(70);
+        table.getColumnModel().getColumn(COL_ID).setMaxWidth(70);
+        table.setDefaultRenderer(Object.class, new UiKit.CellRenderer(SwingConstants.LEFT, false, false));
+        UiKit.CellRenderer right = new UiKit.CellRenderer(SwingConstants.RIGHT, false, false);
+        for (int c : new int[]{COL_COST, COL_MARKUP, COL_PRICE, COL_STOCK}) table.getColumnModel().getColumn(c).setCellRenderer(right);
+        table.getColumnModel().getColumn(COL_PRICE).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, true, false));
+        table.getColumnModel().getColumn(COL_ID).setCellRenderer(new UiKit.CellRenderer(SwingConstants.LEFT, false, true));
         table.getColumnModel().getColumn(COL_PICTURE).setCellRenderer(new ThumbRenderer());
+        table.getColumnModel().getColumn(COL_STATUS).setCellRenderer(new UiKit.PillRenderer(InventoryPanel::statusColor));
+        UiKit.alignHeaders(table, COL_COST, COL_MARKUP, COL_PRICE, COL_STOCK);
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
             int viewRow = table.getSelectedRow();
             if (viewRow == -1) {
                 selectedProductId = null;
+                updateFormMode();
                 return;
             }
             int row = table.convertRowIndexToModel(viewRow);
-
             selectedProductId = String.valueOf(inventoryTable.getValueAt(row, COL_ID));
-            txtProduct.setText(String.valueOf(inventoryTable.getValueAt(row, COL_NAME)));
-            txtSupplier.setText(String.valueOf(inventoryTable.getValueAt(row, COL_SUPPLIER)));
-            txtPrice.setText(String.valueOf(inventoryTable.getValueAt(row, COL_PRICE)));
-            txtStock.setText(String.valueOf(inventoryTable.getValueAt(row, COL_STOCK)));
+            fillForm(products.get(selectedProductId));
             pendingJpeg = null;
             pendingRemove = false;
             showSavedPicture();
         });
 
-        JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
-        scrollPane.getViewport().setBackground(Theme.CARD);
-
-        JPanel tableCard = new JPanel(new BorderLayout(0, 8));
-        tableCard.setBackground(Theme.CARD);
-        tableCard.setBorder(cardBorder());
+        JPanel tableCard = UiKit.card(new BorderLayout(0, 8), 12, 14);
         JPanel tableHeading = new JPanel(new BorderLayout());
         tableHeading.setOpaque(false);
-        JLabel tableTitle = new JLabel("Inventory");
-        tableTitle.setFont(new Font("SansSerif", Font.BOLD, 16));
-        tableTitle.setForeground(Theme.TEXT);
-        lblCount = new JLabel(" ");
-        lblCount.setFont(Theme.SUBTLE);
+        tableHeading.add(UiKit.cardHeading("Products", null), BorderLayout.WEST);
+        lblCount.setFont(Theme.SMALL);
         lblCount.setForeground(Theme.MUTED);
-        tableHeading.add(tableTitle, BorderLayout.WEST);
         tableHeading.add(lblCount, BorderLayout.EAST);
         tableCard.add(tableHeading, BorderLayout.NORTH);
-        tableCard.add(scrollPane, BorderLayout.CENTER);
-        add(tableCard, BorderLayout.CENTER);
+        tableCard.add(UiKit.tableScroll(table), BorderLayout.CENTER);
+        productsTab.add(tableCard, BorderLayout.CENTER);
+
+        tabs.addTab("Products", productsTab);
+        tabs.addTab("Stock history", historyPanel);
+        tabs.addChangeListener(e -> {
+            if (tabs.getSelectedComponent() == historyPanel) historyPanel.reloadProducts(products.values());
+        });
+        add(tabs, BorderLayout.CENTER);
 
         loadInventory("", "All stock levels");
     }
 
-    // ---------- HELPERS ----------
+    private static Color statusColor(String status) {
+        switch (status) {
+            case "High": return Theme.OK;
+            case "Moderate": return Theme.BLUE;
+            case "Low": return Theme.WARN;
+            case "Critical":
+            case "Out": return Theme.DANGER;
+            default: return Theme.MUTED;
+        }
+    }
+
+    // ---------- FORM ----------
 
     private JPanel buildProductCard() {
-        styleField(txtProduct);
-        styleField(txtSupplier);
-        styleField(txtPrice);
-        styleField(txtStock);
+        for (JTextField f : new JTextField[]{txtProduct, txtSupplier, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+            UiKit.styleField(f);
+        }
+        UiKit.placeholder(txtCost, "e.g. 45.00");
+        UiKit.placeholder(txtMarkup, "e.g. 12");
+        UiKit.placeholder(txtMinMarkup, "0.00");
+        cmbMarkupType.setFont(Theme.SUBTLE);
+        txtCost.setToolTipText("Puhunan: what one unit costs you (capital cost)");
+        txtMarkup.setToolTipText("Patong: what you add on top of the puhunan, in pesos or as a percent of the puhunan");
+        txtPrice.setToolTipText("Selling price = puhunan + patong. Typed in only for products without puhunan.");
+        txtMinMarkup.setToolTipText("Agents can discount a booking down to puhunan + this amount per unit, never below");
+        txtStock.setToolTipText("Stock on hand when you add the product. Later use Restock or Correct stock.");
 
-        JPanel card = new JPanel(new BorderLayout(0, 10));
-        card.setBackground(Theme.CARD);
-        card.setBorder(cardBorder());
+        DocumentListener recalc = new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { updatePricing(); }
+            public void removeUpdate(DocumentEvent e) { updatePricing(); }
+            public void changedUpdate(DocumentEvent e) { updatePricing(); }
+        };
+        // Not on the price field: the price is what this writes (a listener may not change its own field).
+        for (JTextField f : new JTextField[]{txtCost, txtMarkup, txtMinMarkup}) f.getDocument().addDocumentListener(recalc);
+        cmbMarkupType.addActionListener(e -> updatePricing());
+        // A product that only had a price gets its patong filled in when its puhunan is first typed.
+        txtCost.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) {
+                suggestMarkupFromPrice();
+            }
+        });
 
-        JPanel heading = new JPanel(new BorderLayout(0, 3));
-        heading.setOpaque(false);
-        JLabel title = new JLabel("Product details");
-        title.setFont(new Font("SansSerif", Font.BOLD, 16));
-        title.setForeground(Theme.TEXT);
-        JLabel hint = new JLabel("Select a product below to edit its details.");
-        hint.setFont(Theme.SUBTLE);
-        hint.setForeground(Theme.MUTED);
-        heading.add(title, BorderLayout.NORTH);
-        heading.add(hint, BorderLayout.SOUTH);
-        card.add(heading, BorderLayout.NORTH);
+        JPanel card = UiKit.card(new BorderLayout(14, 10), 14, 16);
+        card.add(UiKit.cardHeading("Product details",
+                "Select a product below to edit it. Selling price = puhunan + patong."), BorderLayout.NORTH);
 
-        JPanel fields = new JPanel(new GridLayout(1, 4, 12, 0));
+        JPanel fields = new JPanel(new GridBagLayout());
         fields.setOpaque(false);
-        fields.add(fieldGroup("Product", txtProduct));
-        fields.add(fieldGroup("Supplier", txtSupplier));
-        fields.add(fieldGroup("Price", txtPrice));
-        fields.add(fieldGroup("Stock Quantity", txtStock));
-        // Fields keep the full width (as before); the picture row sits under them.
-        JPanel body = new JPanel(new BorderLayout(0, 10));
+        GridBagConstraints g = new GridBagConstraints();
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.anchor = GridBagConstraints.NORTHWEST;
+        g.insets = new Insets(0, 0, 10, 12);
+        g.weightx = 1;
+
+        g.gridy = 0;
+        g.gridx = 0;
+        g.gridwidth = 2;
+        fields.add(UiKit.group("Product", txtProduct), g);
+        g.gridx = 2;
+        fields.add(UiKit.group("Supplier", txtSupplier), g);
+
+        g.gridy = 1;
+        g.gridwidth = 1;
+        g.gridx = 0;
+        fields.add(UiKit.group("Puhunan per unit (₱)", txtCost), g);
+        JPanel markup = new JPanel(new BorderLayout(6, 0));
+        markup.setOpaque(false);
+        markup.add(cmbMarkupType, BorderLayout.WEST);
+        markup.add(txtMarkup, BorderLayout.CENTER);
+        g.gridx = 1;
+        fields.add(UiKit.group("Patong (markup)", markup), g);
+        g.gridx = 2;
+        fields.add(UiKit.group("Selling price (₱)", txtPrice), g);
+        g.gridx = 3;
+        fields.add(UiKit.group("Minimum patong for discounts (₱)", txtMinMarkup), g);
+
+        g.gridy = 2;
+        g.gridx = 0;
+        JPanel stockGroup = new JPanel(new BorderLayout(0, 5));
+        stockGroup.setOpaque(false);
+        stockGroup.add(lblStockCaption, BorderLayout.NORTH);
+        stockGroup.add(txtStock, BorderLayout.CENTER);
+        fields.add(stockGroup, g);
+        g.gridx = 1;
+        g.gridwidth = 3;
+        lblPricing.setFont(Theme.SMALL);
+        lblPricing.setForeground(Theme.MUTED);
+        fields.add(lblPricing, g);
+
+        g.gridy = 3;
+        g.gridx = 0;
+        g.gridwidth = 4;
+        g.insets = new Insets(0, 0, 0, 12);
+        lblServerNote.setFont(Theme.SMALL);
+        lblServerNote.setForeground(Theme.WARN);
+        fields.add(lblServerNote, g);
+
+        JPanel body = new JPanel(new BorderLayout(16, 0));
         body.setOpaque(false);
-        body.add(fields, BorderLayout.NORTH);
-        body.add(buildPictureBox(), BorderLayout.CENTER);
+        body.add(fields, BorderLayout.CENTER);
+        body.add(buildPictureBox(), BorderLayout.EAST);
         card.add(body, BorderLayout.CENTER);
 
         btnClear = UiKit.secondaryButton("Clear fields");
         btnAdd = UiKit.primaryButton("Add product");
         btnUpdate = UiKit.secondaryButton("Update product");
         btnDelete = UiKit.dangerButton("Delete product");
+        btnRestock = UiKit.secondaryButton("Restock...");
+        btnAdjust = UiKit.secondaryButton("Correct stock...");
+        btnRestock.setToolTipText("Record newly bought stock: quantity and cost per unit (a purchase, not a sale)");
+        btnAdjust.setToolTipText("Fix the stock count with a reason (damaged, expired, count difference)");
         btnClear.addActionListener(e -> clearFields());
-        // A chosen or removed picture is saved together with the product; the fields are cleared
-        // only once everything is saved, so a failed upload can be retried with Update product.
-        btnAdd.addActionListener(e -> {
-            Integer id = addProduct();
-            if (id != null) savePicture(id, true);
-        });
-        btnUpdate.addActionListener(e -> {
-            Integer id = updateProduct();
-            if (id != null) savePicture(id, false);
-        });
+        btnAdd.addActionListener(e -> saveProduct(true));
+        btnUpdate.addActionListener(e -> saveProduct(false));
         btnDelete.addActionListener(e -> {
             if (deleteProduct()) clearFields();
         });
+        btnRestock.addActionListener(e -> openRestock());
+        btnAdjust.addActionListener(e -> openAdjust());
 
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        JPanel actions = new JPanel(new BorderLayout());
         actions.setOpaque(false);
-        actions.add(btnClear);
-        actions.add(btnAdd);
-        actions.add(btnUpdate);
-        actions.add(btnDelete);
+        JPanel stockActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        stockActions.setOpaque(false);
+        stockActions.add(btnRestock);
+        stockActions.add(btnAdjust);
+        JPanel productActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        productActions.setOpaque(false);
+        productActions.add(btnClear);
+        productActions.add(btnAdd);
+        productActions.add(btnUpdate);
+        productActions.add(btnDelete);
+        actions.add(stockActions, BorderLayout.WEST);
+        actions.add(productActions, BorderLayout.EAST);
         card.add(actions, BorderLayout.SOUTH);
+        updateFormMode();
         return card;
+    }
+
+    private void fillForm(InventoryService.Product p) {
+        if (p == null) return;
+        txtProduct.setText(p.name);
+        txtSupplier.setText(p.supplier == null ? "" : p.supplier);
+        txtCost.setText(p.cost == null ? "" : p.cost.toPlainString());
+        cmbMarkupType.setSelectedIndex("PERCENT".equals(p.markupType) ? 1 : 0);
+        txtMarkup.setText(p.markupValue == null ? "" : p.markupValue.stripTrailingZeros().toPlainString());
+        txtPrice.setText(p.price == null ? "" : p.price.toPlainString());
+        txtMinMarkup.setText(p.minMarkup == null || p.minMarkup.signum() == 0 ? "" : p.minMarkup.toPlainString());
+        txtStock.setText(String.valueOf(p.stock));
+        updateFormMode();
+    }
+
+    private void suggestMarkupFromPrice() {
+        if (!pricingSupported || !txtMarkup.getText().trim().isEmpty()) return;
+        try {
+            BigDecimal cost = Money.parse(txtCost.getText(), "puhunan", true);
+            BigDecimal price = Money.parse(txtPrice.getText(), "selling price", true);
+            if (cost != null && price != null && price.compareTo(cost) >= 0) {
+                cmbMarkupType.setSelectedIndex(0);
+                txtMarkup.setText(price.subtract(cost).toPlainString());
+            }
+        } catch (IllegalArgumentException ignored) {
+            // the field shows its own problem when saving
+        }
+    }
+
+    private String markupType() {
+        return cmbMarkupType.getSelectedIndex() == 1 ? "PERCENT" : "AMOUNT";
+    }
+
+    /** Which fields can be typed in, and the button states, for "new product" / "selected" / older server. */
+    private void updateFormMode() {
+        boolean selected = selectedProductId != null;
+        boolean hasCost = !txtCost.getText().trim().isEmpty();
+        txtCost.setEnabled(pricingSupported);
+        cmbMarkupType.setEnabled(pricingSupported && hasCost);
+        txtMarkup.setEnabled(pricingSupported && hasCost);
+        txtMinMarkup.setEnabled(pricingSupported);
+        txtPrice.setEditable(!pricingSupported || !hasCost);
+        if (pricingSupported) {
+            lblStockCaption.setText(selected ? "In stock" : "Starting stock");
+            txtStock.setEditable(!selected);
+        } else {
+            lblStockCaption.setText("Stock quantity");
+            txtStock.setEditable(true);
+        }
+        if (!selected && !pricingSupported) txtStock.setEditable(true);
+        readOnlyLook(txtStock);
+        boolean idle = !saving && !imageBusy;
+        btnAdd.setEnabled(idle);
+        btnUpdate.setEnabled(idle && selected);
+        btnDelete.setEnabled(idle && selected);
+        btnClear.setEnabled(idle);
+        btnRestock.setEnabled(idle && selected && pricingSupported);
+        btnAdjust.setEnabled(idle && selected && pricingSupported);
+        updatePricing();
+    }
+
+    /** The live line under the price: how the price is made and what agents may discount to. */
+    private void updatePricing() {
+        if (!pricingSupported) {
+            lblPricing.setText(" ");
+            return;
+        }
+        boolean hasCost = !txtCost.getText().trim().isEmpty();
+        txtPrice.setEditable(!hasCost);
+        readOnlyLook(txtPrice);
+        cmbMarkupType.setEnabled(hasCost);
+        txtMarkup.setEnabled(hasCost);
+        try {
+            BigDecimal cost = Money.parse(txtCost.getText(), "puhunan", true);
+            if (cost == null) {
+                lblPricing.setText(html("No puhunan: the price is typed in. Profit cannot be worked out and agents "
+                        + "cannot give discounts on this product until a puhunan is set."));
+                lblPricing.setForeground(Theme.MUTED);
+                return;
+            }
+            BigDecimal mv = parseMarkupValue(true);
+            if (mv == null) {
+                lblPricing.setText(html("Enter the patong: the selling price is puhunan + patong."));
+                lblPricing.setForeground(Theme.MUTED);
+                return;
+            }
+            BigDecimal price = Money.sellingPrice(cost, markupType(), mv);
+            if (!price.toPlainString().equals(txtPrice.getText())) txtPrice.setText(price.toPlainString());
+            BigDecimal min = Money.parse(txtMinMarkup.getText(), "minimum patong", true);
+            BigDecimal floor = cost.add(min == null ? BigDecimal.ZERO : min);
+            BigDecimal margin = Money.marginPercent(cost, price);
+            lblPricing.setText(html("Selling price " + Money.peso(price) + " = puhunan " + Money.peso(cost) + " + patong "
+                    + Money.peso(price.subtract(cost)) + (margin == null ? "" : " (" + margin + "% of the price)")
+                    + ". Agents may discount down to " + Money.peso(floor) + " per unit."));
+            lblPricing.setForeground(Theme.TEXT);
+        } catch (IllegalArgumentException ex) {
+            lblPricing.setText(html(ex.getMessage()));
+            lblPricing.setForeground(Theme.DANGER);
+        }
+    }
+
+    /** A field that shows a value but cannot be typed in looks greyed, so nobody tries. */
+    private static void readOnlyLook(JTextField f) {
+        f.setBackground(f.isEditable() && f.isEnabled() ? Theme.CARD : Theme.SUBTLE_BG);
+    }
+
+    private BigDecimal parseMarkupValue(boolean optional) {
+        String t = txtMarkup.getText().trim().replace("%", "");
+        if (t.isEmpty()) {
+            if (optional) return null;
+            throw new IllegalArgumentException("Enter the patong (markup).");
+        }
+        BigDecimal v = Money.parse(t, "patong", false);
+        if ("PERCENT".equals(markupType()) && v.compareTo(new BigDecimal(1000)) > 0) {
+            throw new IllegalArgumentException("A percent patong can be at most 1000%.");
+        }
+        return v;
     }
 
     // ---------- PICTURE ----------
@@ -205,11 +420,11 @@ public class InventoryPanel extends JPanel {
         preview.setPreferredSize(new Dimension(PREVIEW, PREVIEW));
         preview.setMinimumSize(new Dimension(PREVIEW, PREVIEW));
         preview.setOpaque(true);
-        preview.setBackground(Theme.BACKGROUND);
+        preview.setBackground(Theme.SUBTLE_BG);
         preview.setForeground(Theme.MUTED);
-        preview.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        preview.setFont(Theme.SMALL);
         preview.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
-        imageStatus.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        imageStatus.setFont(Theme.SMALL);
         imageStatus.setForeground(Theme.MUTED);
         imageProgress.setIndeterminate(true);
         imageProgress.setVisible(false);
@@ -226,7 +441,7 @@ public class InventoryPanel extends JPanel {
 
         JPanel right = new JPanel(new BorderLayout(0, 6));
         right.setOpaque(false);
-        right.add(UiKit.caption("Picture (shown in the mobile app)"), BorderLayout.NORTH);
+        right.add(UiKit.caption("Picture (mobile app)"), BorderLayout.NORTH);
         right.add(buttons, BorderLayout.CENTER);
         JPanel statusBox = new JPanel(new BorderLayout(0, 3));
         statusBox.setOpaque(false);
@@ -238,11 +453,11 @@ public class InventoryPanel extends JPanel {
         box.setOpaque(false);
         box.add(preview, BorderLayout.WEST);
         box.add(right, BorderLayout.CENTER);
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));   // keeps the box at its own width
-        row.setOpaque(false);
-        row.add(box);
+        JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));   // keeps the box at its own width
+        wrap.setOpaque(false);
+        wrap.add(box);
         showSavedPicture();
-        return row;
+        return wrap;
     }
 
     private void chooseImage() {
@@ -353,7 +568,10 @@ public class InventoryPanel extends JPanel {
         for (int r = 0; r < inventoryTable.getRowCount(); r++) {
             if (productId.equals(String.valueOf(inventoryTable.getValueAt(r, COL_ID)))) {
                 int view = table.convertRowIndexToView(r);
-                if (view >= 0) table.getSelectionModel().setSelectionInterval(view, view);
+                if (view >= 0) {
+                    table.getSelectionModel().setSelectionInterval(view, view);
+                    table.scrollRectToVisible(table.getCellRect(view, 0, true));
+                }
                 return;
             }
         }
@@ -416,7 +634,7 @@ public class InventoryPanel extends JPanel {
         preview.setIcon(new ImageIcon(fit(img, PREVIEW - 4)));
     }
 
-    private static Image fit(BufferedImage img, int max) {
+    static Image fit(BufferedImage img, int max) {
         double scale = Math.min(max / (double) img.getWidth(), max / (double) img.getHeight());
         if (scale >= 1) return img;
         return img.getScaledInstance(Math.max(1, (int) Math.round(img.getWidth() * scale)),
@@ -430,9 +648,7 @@ public class InventoryPanel extends JPanel {
             imageStatus.setText(html(text));
             imageStatus.setForeground(Theme.MUTED);
         }
-        for (JButton b : new JButton[]{btnAdd, btnUpdate, btnDelete, btnClear}) {
-            if (b != null) b.setEnabled(!busy);
-        }
+        updateFormMode();
         updatePictureButtons();
     }
 
@@ -446,15 +662,7 @@ public class InventoryPanel extends JPanel {
     private static String html(String text) {
         String safe = text == null ? "" : text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("&lt;center&gt;", "<center>").replace("&lt;/center&gt;", "</center>");
-        return "<html><body style='width:150px'>" + safe + "</body></html>";
-    }
-
-    private static boolean hasColumn(ResultSet rs, String name) throws SQLException {
-        java.sql.ResultSetMetaData md = rs.getMetaData();
-        for (int i = 1; i <= md.getColumnCount(); i++) {
-            if (name.equalsIgnoreCase(md.getColumnName(i))) return true;
-        }
-        return false;
+        return "<html>" + safe + "</html>";
     }
 
     /** Small picture in the table: downloaded once in the background, "-" when there is none. */
@@ -467,7 +675,7 @@ public class InventoryPanel extends JPanel {
             setIcon(null);
             String path = value == null ? "" : value.toString();
             if (path.isEmpty()) {
-                setText("\u2014");
+                setText("—");
                 setForeground(Theme.MUTED);
                 setToolTipText("No picture");
                 return this;
@@ -511,31 +719,15 @@ public class InventoryPanel extends JPanel {
     }
 
     private JPanel buildSearchCard() {
-        UiKit.styleField(txtSearch);
-        txtSearch.setToolTipText("Search by product ID, product name, or supplier");
+        UiKit.searchField(txtSearch, "Search by ID, product or supplier");
         txtSearch.addActionListener(e -> searchProducts());
         cmbFilter.setFont(Theme.SUBTLE);
-        cmbFilter.setBackground(Theme.CARD);
-        cmbFilter.setForeground(Theme.TEXT);
-        cmbFilter.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
         cmbFilter.addActionListener(e -> searchProducts());
 
         JButton btnSearch = UiKit.primaryButton("Search");
         btnSearch.addActionListener(e -> searchProducts());
 
-        JPanel card = new JPanel(new BorderLayout(12, 0));
-        card.setBackground(Theme.CARD);
-        card.setBorder(cardBorder());
-        JPanel searchGroup = new JPanel(new BorderLayout(8, 0));
-        searchGroup.setOpaque(false);
-        searchGroup.add(UiKit.caption("Search products"), BorderLayout.NORTH);
-        searchGroup.add(txtSearch, BorderLayout.CENTER);
-
-        JPanel filterGroup = new JPanel(new BorderLayout(8, 0));
-        filterGroup.setOpaque(false);
-        filterGroup.add(UiKit.caption("Stock status"), BorderLayout.NORTH);
-        filterGroup.add(cmbFilter, BorderLayout.CENTER);
-
+        JPanel card = UiKit.card(new BorderLayout(12, 0), 10, 14);
         JPanel inputs = new JPanel(new GridBagLayout());
         inputs.setOpaque(false);
         GridBagConstraints c = new GridBagConstraints();
@@ -543,117 +735,45 @@ public class InventoryPanel extends JPanel {
         c.fill = GridBagConstraints.HORIZONTAL;
         c.insets = new Insets(0, 0, 0, 10);
         c.weightx = 1;
-        inputs.add(searchGroup, c);
+        inputs.add(UiKit.group("Search products", txtSearch), c);
         c.gridx = 1;
         c.weightx = 0;
-        inputs.add(filterGroup, c);
+        inputs.add(UiKit.group("Stock status", cmbFilter), c);
         card.add(inputs, BorderLayout.CENTER);
-        card.add(btnSearch, BorderLayout.EAST);
+        JPanel button = new JPanel(new BorderLayout());
+        button.setOpaque(false);
+        button.add(btnSearch, BorderLayout.SOUTH);
+        card.add(button, BorderLayout.EAST);
         return card;
     }
 
-    private JPanel fieldGroup(String label, JTextField field) {
-        JPanel group = new JPanel(new BorderLayout(0, 5));
-        group.setOpaque(false);
-        group.add(UiKit.caption(label), BorderLayout.NORTH);
-        group.add(field, BorderLayout.CENTER);
-        return group;
-    }
-
-    private javax.swing.border.Border cardBorder() {
-        return BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(12, 14, 12, 14));
-    }
-
-    private void styleField(JTextField field) {
-        field.setBackground(Theme.CARD);
-        UiKit.styleField(field);
-    }
-
-    private void styleTable() {
-        table.setRowHeight(44);
-        table.setFont(Theme.SUBTLE);
-        table.setForeground(Theme.TEXT);
-        table.setBackground(Theme.CARD);
-        table.setSelectionBackground(Color.decode("#DBEAFE"));
-        table.setSelectionForeground(Theme.TEXT);
-        table.setShowVerticalLines(false);
-        table.setGridColor(Theme.BORDER);
-        table.setIntercellSpacing(new Dimension(0, 1));
-        table.setFillsViewportHeight(true);
-        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setAutoCreateRowSorter(true);
-        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
-            @Override
-            public Component getTableCellRendererComponent(JTable t, Object value, boolean selected,
-                                                           boolean focus, int row, int column) {
-                super.getTableCellRendererComponent(t, value, selected, false, row, column);
-                setFont(Theme.SUBTLE);
-                setForeground(Theme.TEXT);
-                setBorder(new EmptyBorder(0, 8, 0, 8));
-                if (column == COL_STATUS && !selected) {
-                    String status = value == null ? "" : value.toString();
-                    switch (status) {
-                        case "High":
-                            setForeground(Theme.OK);
-                            break;
-                        case "Moderate":
-                            setForeground(Theme.BLUE);
-                            break;
-                        case "Low":
-                            setForeground(Theme.WARN);
-                            break;
-                        case "Critical":
-                        case "Out":
-                            setForeground(Theme.DANGER);
-                            break;
-                        default:
-                            setForeground(Theme.MUTED);
-                    }
-                    setFont(Theme.NAV_ON);
-                }
-                return this;
-            }
-        });
-        DefaultTableCellRenderer headerRenderer = new DefaultTableCellRenderer();
-        headerRenderer.setHorizontalAlignment(SwingConstants.LEFT);
-        headerRenderer.setBackground(Color.decode("#F8FAFC"));
-        headerRenderer.setForeground(Theme.MUTED);
-        headerRenderer.setFont(new Font("SansSerif", Font.BOLD, 12));
-        headerRenderer.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
-        table.getTableHeader().setDefaultRenderer(headerRenderer);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getTableHeader().setPreferredSize(new Dimension(100, 34));
-    }
-
-    private String getStatus(int stock) {
-        if (stock > 99)      return "High";
+    private static String getStatus(int stock) {
+        if (stock > 99) return "High";
         else if (stock > 59) return "Moderate";
         else if (stock > 29) return "Low";
-        //else if (stock > 9)  return "Critical";
         else if (stock == 0) return "Out";
-        else                 return "Critical";
+        else return "Critical";
     }
 
-    /** Blanks Product/Supplier/Price/Stock and deselects the table row. */
+    /** Blanks the form and deselects the table row. */
     private void clearFields() {
-        txtProduct.setText("");
-        txtSupplier.setText("");
-        txtPrice.setText("");
-        txtStock.setText("");
+        for (JTextField f : new JTextField[]{txtProduct, txtSupplier, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+            f.setText("");
+        }
+        cmbMarkupType.setSelectedIndex(0);
         selectedProductId = null;
         table.clearSelection();
         pendingJpeg = null;
         pendingRemove = false;
         showSavedPicture();
+        updateFormMode();
     }
 
     // ---------- DATA ----------
 
-    /** Reload everything (keeps your old loadInventory() calls working). */
+    /** Reload everything (keeps the older loadInventory() calls working). */
     public void loadInventory() {
-        loadInventory("", "All stock levels");
+        loadInventory(txtSearch.getText().trim(), (String) cmbFilter.getSelectedItem());
     }
 
     private void searchProducts() {
@@ -661,149 +781,211 @@ public class InventoryPanel extends JPanel {
     }
 
     private void loadInventory(String keyword, String statusFilter) {
-        String query = "SELECT * FROM products "
-                + "WHERE product_id::text ILIKE ? OR product_name ILIKE ? OR supplier ILIKE ? "
-                + "ORDER BY product_id";
-
+        String keep = selectedProductId;
         inventoryTable.setRowCount(0);
         imagePaths.clear();
+        products.clear();
         thumbsLoading.clear();
         thumbsFailed.clear();
-
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pst = conn.prepareStatement(query)) {
-
-            String like = "%" + keyword + "%";
-            pst.setString(1, like);
-            pst.setString(2, like);
-            pst.setString(3, like);
-
-            try (ResultSet rs = pst.executeQuery()) {
-                picturesSupported = hasColumn(rs, "image_path");
-                while (rs.next()) {
-                    int stock = rs.getInt("stock");
-                    String status = getStatus(stock);
-
-                    if (statusFilter != null && !"All stock levels".equals(statusFilter)
-                            && !"Status".equals(statusFilter) && !status.equals(statusFilter)) {
-                        continue;
-                    }
-
-                    String id = rs.getString("product_id");
-                    String path = picturesSupported ? rs.getString("image_path") : null;
-                    if (path != null) imagePaths.put(id, path);
-                    inventoryTable.addRow(new Object[]{
-                            path == null ? "" : path,
-                            id,
-                            rs.getString("product_name"),
-                            rs.getString("supplier"),
-                            rs.getString("price"),
-                            String.valueOf(stock),
-                            status
-                    });
+        try {
+            InventoryService.Catalog catalog = InventoryService.list(keyword);
+            picturesSupported = catalog.pictures;
+            pricingSupported = catalog.pricing && Db.salesReady();
+            for (InventoryService.Product p : catalog.products) {
+                String status = getStatus(p.stock);
+                if (statusFilter != null && !"All stock levels".equals(statusFilter) && !status.equals(statusFilter)) {
+                    continue;
                 }
+                String id = String.valueOf(p.id);
+                products.put(id, p);
+                if (p.imagePath != null) imagePaths.put(id, p.imagePath);
+                inventoryTable.addRow(new Object[]{
+                        p.imagePath == null ? "" : p.imagePath,
+                        id,
+                        p.name,
+                        p.supplier == null ? "" : p.supplier,
+                        p.cost == null ? "—" : Money.plain(p.cost),
+                        p.markupText(),
+                        Money.plain(p.price),
+                        String.valueOf(p.stock),
+                        status
+                });
             }
+            long noCost = catalog.products.stream().filter(p -> p.cost == null).count();
             lblCount.setText(inventoryTable.getRowCount() + " products"
+                    + (pricingSupported && noCost > 0 ? "   ·   " + noCost + " without puhunan" : "")
                     + (picturesSupported ? "" : "   (pictures: not set up on the server yet)"));
+            lblServerNote.setText(pricingSupported ? " "
+                    : html("Puhunan, patong, restocking and the stock history need the " + Db.UPDATE_27
+                    + " on the server. Until then products are saved as before."));
             updatePictureButtons();
         } catch (SQLException e) {
             lblCount.setText("Unable to load products");
-            JOptionPane.showMessageDialog(this, "Database error: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, Db.message(e, "Could not load the products"),
+                    "Inventory", JOptionPane.ERROR_MESSAGE);
         }
+        if (keep != null && products.containsKey(keep)) {
+            selectRow(keep);
+        } else {
+            selectedProductId = null;
+        }
+        updateFormMode();
+        historyPanel.reloadProducts(products.values());
     }
 
     // ---------- ADD / UPDATE / DELETE ----------
-    // (The button listeners call clearFields() afterwards, so these don't need to.)
 
-    private boolean validateInputs() {
-        if (txtProduct.getText().trim().isEmpty() || txtSupplier.getText().trim().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Product and Supplier are required.",
-                    "Missing Data", JOptionPane.WARNING_MESSAGE);
-            return false;
+    private void saveProduct(boolean add) {
+        if (!add && selectedProductId == null) {
+            JOptionPane.showMessageDialog(this, "Click a product in the table first.", "No selection",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
         }
+        String name = txtProduct.getText().trim();
+        String supplier = txtSupplier.getText().trim();
+        if (name.isEmpty() || supplier.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Product and Supplier are required.", "Missing data",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (!pricingSupported) {
+            Integer id = add ? legacyAdd(name, supplier) : legacyUpdate(name, supplier);
+            if (id != null) savePicture(id, add);
+            return;
+        }
+        final BigDecimal cost, markupValue, minMarkup, price;
+        final Integer startingStock;
         try {
-            new BigDecimal(txtPrice.getText().trim());
-            Integer.parseInt(txtStock.getText().trim());
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Price and Stock must be valid numbers.",
-                    "Invalid Input", JOptionPane.WARNING_MESSAGE);
-            return false;
+            cost = Money.parse(txtCost.getText(), "puhunan", true);
+            markupValue = cost == null ? null : parseMarkupValue(false);
+            price = cost == null ? Money.parse(txtPrice.getText(), "selling price", false) : null;
+            minMarkup = Money.parse(txtMinMarkup.getText(), "minimum patong", true);
+            startingStock = add ? Money.parseInt(txtStock.getText().isBlank() ? "0" : txtStock.getText(),
+                    "starting stock", 0, 1_000_000) : null;
+        } catch (IllegalArgumentException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Check the product", JOptionPane.WARNING_MESSAGE);
+            return;
         }
-        return true;
-    }
-
-    /** @return the new product's id, or null when nothing was added. */
-    private Integer addProduct() {
-        if (!validateInputs()) return null;
-
-        // product_id is generated by the database (identity); RETURNING gives it back for the picture.
-        String sql = "INSERT INTO products (product_name, supplier, price, stock) VALUES (?, ?, ?, ?) RETURNING product_id";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pst = conn.prepareStatement(sql)) {
-            pst.setString(1, txtProduct.getText().trim());
-            pst.setString(2, txtSupplier.getText().trim());
-            pst.setBigDecimal(3, new BigDecimal(txtPrice.getText().trim()));
-            pst.setInt(4, Integer.parseInt(txtStock.getText().trim()));
-            Integer id = null;
-            try (ResultSet rs = pst.executeQuery()) {
-                if (rs.next()) id = rs.getInt(1);
+        if (cost == null && minMarkup != null && minMarkup.signum() > 0) {
+            JOptionPane.showMessageDialog(this, "Enter the puhunan first: the minimum patong is added to it.",
+                    "Check the product", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        final Integer id = add ? null : Integer.valueOf(selectedProductId);
+        final String type = markupType();
+        saving = true;
+        updateFormMode();
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                return InventoryService.save(id, name, supplier, cost, type, markupValue, minMarkup, price, startingStock);
             }
+
+            @Override
+            protected void done() {
+                saving = false;
+                try {
+                    int savedId = get();
+                    selectedProductId = String.valueOf(savedId);
+                    loadInventory();
+                    savePicture(savedId, add);
+                } catch (Exception ex) {
+                    Throwable c = ex.getCause() != null ? ex.getCause() : ex;
+                    updateFormMode();
+                    JOptionPane.showMessageDialog(InventoryPanel.this, c.getMessage(),
+                            add ? "Product not added" : "Product not updated", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void openRestock() {
+        InventoryService.Product p = selectedProductId == null ? null : products.get(selectedProductId);
+        if (p == null) return;
+        if (StockDialogs.restock(SwingUtilities.getWindowAncestor(this), p)) {
             loadInventory();
-            return id;
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Could not add product: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-            return null;
+            historyPanel.reloadIfShown();
         }
     }
 
-    /** @return the updated product's id, or null when nothing was updated. */
-    private Integer updateProduct() {
-        if (selectedProductId == null) {
-            JOptionPane.showMessageDialog(this, "Click a product in the table first.",
-                    "No Selection", JOptionPane.WARNING_MESSAGE);
-            return null;
-        }
-        if (!validateInputs()) return null;
-        final String updatedId = selectedProductId;
-
-        String sql = "UPDATE products SET product_name = ?, supplier = ?, price = ?, stock = ? "
-                + "WHERE product_id::text = ?";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pst = conn.prepareStatement(sql)) {
-            pst.setString(1, txtProduct.getText().trim());
-            pst.setString(2, txtSupplier.getText().trim());
-            pst.setBigDecimal(3, new BigDecimal(txtPrice.getText().trim()));
-            pst.setInt(4, Integer.parseInt(txtStock.getText().trim()));
-            pst.setString(5, updatedId);
-            pst.executeUpdate();
+    private void openAdjust() {
+        InventoryService.Product p = selectedProductId == null ? null : products.get(selectedProductId);
+        if (p == null) return;
+        if (StockDialogs.adjust(SwingUtilities.getWindowAncestor(this), p)) {
             loadInventory();
-            return Integer.valueOf(updatedId);
-        } catch (SQLException | NumberFormatException e) {
-            JOptionPane.showMessageDialog(this, "Could not update product: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-            return null;
+            historyPanel.reloadIfShown();
         }
+    }
+
+    // Older servers (before 20261027_01): the previous direct statements, price and stock typed in.
+
+    private Integer legacyAdd(String name, String supplier) {
+        try {
+            BigDecimal price = Money.parse(txtPrice.getText(), "price", false);
+            int stock = Money.parseInt(txtStock.getText(), "stock quantity", 0, 1_000_000);
+            try (Connection conn = DatabaseConnection.getConnection();
+                 PreparedStatement pst = conn.prepareStatement(
+                         "INSERT INTO products (product_name, supplier, price, stock) VALUES (?, ?, ?, ?) RETURNING product_id")) {
+                pst.setString(1, name);
+                pst.setString(2, supplier);
+                pst.setBigDecimal(3, price);
+                pst.setInt(4, stock);
+                try (ResultSet rs = pst.executeQuery()) {
+                    rs.next();
+                    int id = rs.getInt(1);
+                    loadInventory();
+                    return id;
+                }
+            }
+        } catch (IllegalArgumentException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Check the product", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, Db.message(e, "Could not add the product"), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return null;
+    }
+
+    private Integer legacyUpdate(String name, String supplier) {
+        final String updatedId = selectedProductId;
+        try {
+            BigDecimal price = Money.parse(txtPrice.getText(), "price", false);
+            int stock = Money.parseInt(txtStock.getText(), "stock quantity", 0, 1_000_000);
+            try (Connection conn = DatabaseConnection.getConnection();
+                 PreparedStatement pst = conn.prepareStatement(
+                         "UPDATE products SET product_name = ?, supplier = ?, price = ?, stock = ? WHERE product_id::text = ?")) {
+                pst.setString(1, name);
+                pst.setString(2, supplier);
+                pst.setBigDecimal(3, price);
+                pst.setInt(4, stock);
+                pst.setString(5, updatedId);
+                pst.executeUpdate();
+                loadInventory();
+                return Integer.valueOf(updatedId);
+            }
+        } catch (IllegalArgumentException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Check the product", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, Db.message(e, "Could not update the product"), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+        return null;
     }
 
     /** @return false if the user cancelled the confirmation, true otherwise. */
     private boolean deleteProduct() {
         if (selectedProductId == null) {
             JOptionPane.showMessageDialog(this, "Click a product in the table first.",
-                    "No Selection", JOptionPane.WARNING_MESSAGE);
+                    "No selection", JOptionPane.WARNING_MESSAGE);
             return true;
         }
         int confirm = JOptionPane.showConfirmDialog(this,
-                "Delete this product?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                "Delete this product? Products already used in bookings or sales cannot be deleted.\n"
+                        + "Its stock history is kept.", "Confirm delete", JOptionPane.YES_NO_OPTION);
         if (confirm != JOptionPane.YES_OPTION) return false;
 
         final String deletedId = selectedProductId;
         final String deletedPicture = imagePaths.get(deletedId);
-        String sql = "DELETE FROM products WHERE product_id::text = ?";
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pst = conn.prepareStatement(sql)) {
+             PreparedStatement pst = conn.prepareStatement("DELETE FROM products WHERE product_id::text = ?")) {
             pst.setString(1, deletedId);
             int n = pst.executeUpdate();
             if (n > 0 && deletedPicture != null) {
@@ -811,10 +993,13 @@ public class InventoryPanel extends JPanel {
                 new Thread(() -> ProductImageService.deleteQuietly(null, Integer.parseInt(deletedId), deletedPicture),
                         "delete-product-picture").start();
             }
+            selectedProductId = null;
             loadInventory();
         } catch (SQLException e) {
-            JOptionPane.showMessageDialog(this, "Could not delete product: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            String msg = "23503".equals(e.getSQLState())
+                    ? "This product is used in bookings or sales, so it cannot be deleted. Its history must stay correct."
+                    : Db.message(e, "Could not delete the product");
+            JOptionPane.showMessageDialog(this, msg, "Not deleted", JOptionPane.WARNING_MESSAGE);
         }
         return true;
     }

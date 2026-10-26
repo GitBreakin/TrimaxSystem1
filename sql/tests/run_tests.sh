@@ -119,4 +119,19 @@ test "$(psql_owner -tAc "select count(*) from trimax_private.mobile_accounts whe
 test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'trimax_service_finish_provisioning' and prosrc like '%audit_user(''provisioning''%'")" = "1" && echo "PASS rollback put back the previous finish function"
 psql_owner -f 20261026_01_employee_mobile_sign_in.sql
 echo "PASS employee sign-in re-applies after rollback"
+echo "== Sales, inventory, payroll, agent discounts, customer photos, profit reports (twice: re-runnable)"
+psql_owner -f 20261027_01_sales_inventory_payroll.sql 2>/dev/null || psql_owner -f 20261027_01_sales_inventory_payroll.sql
+psql_owner -f 20261027_01_sales_inventory_payroll.sql 2>/dev/null || psql_owner -f 20261027_01_sales_inventory_payroll.sql
+psql_su -d "$DB" -f tests/45_sales_inventory_payroll_tests.sql 2>&1 | sed -n 's/^.*NOTICE:  //p; /ALL SALES/p; /ERROR/p; /CONTEXT/p'
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname = 'save_product'")" = "1"
+echo "== Sales, inventory, payroll rollback, then re-apply"
+psql_owner -f 20261027_93_rollback_sales_inventory_payroll.sql
+test "$(psql_owner -tAc "select count(*) from pg_proc where proname in ('save_product','create_sale','save_payroll','profit_summary','trimax_agent_save_customer','trimax_agent_discount_quote')")" = "0" && echo "PASS rollback removed the new functions"
+test "$(psql_owner -tAc "select pronargs from pg_proc where proname = 'trimax_agent_create_booking'")" = "9" && echo "PASS rollback put back the 9-argument trimax_agent_create_booking"
+test "$(psql_owner -tAc "select (select count(*) from sales) > 0 and (select count(*) from payroll_records) > 0 and (select count(*) from inventory_movements) > 0")" = "t" && echo "PASS rollback kept sales, payroll and stock history"
+before="$(psql_owner -tAc "select count(*) from inventory_movements")"
+psql_owner -c "update products set stock = stock + 1 where product_id = (select min(product_id) from products)" >/dev/null
+test "$(psql_owner -tAc "select count(*) from inventory_movements")" = "$before" && echo "PASS after rollback stock changes are no longer recorded (trigger removed)"
+psql_owner -f 20261027_01_sales_inventory_payroll.sql 2>/dev/null || psql_owner -f 20261027_01_sales_inventory_payroll.sql
+test "$(psql_owner -tAc "select pronargs from pg_proc where proname = 'trimax_agent_create_booking'")" = "11" && echo "PASS sales/inventory/payroll re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"
