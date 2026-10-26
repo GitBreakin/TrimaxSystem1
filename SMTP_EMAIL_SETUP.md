@@ -63,11 +63,15 @@ administrator disabled them). Then use your provider's SMTP relay settings inste
 1. An Admin opens **Agents & Drivers → Create Employee Account** and enters name, email, contact number
    and role.
 2. TRIMAX creates a random initial password internally and stores only its hash.
-3. TRIMAX stores a one-time setup code (hashed, 15 minutes, single use) and emails it.
+3. TRIMAX stores a one-time setup code (hashed, 24 hours, single use, 5 tries) and emails it.
 4. If email is not set up, or sending fails, the whole step is rolled back: no account and no code are
    saved, and the message says what to fix.
+5. TRIMAX then creates the person's Supabase sign-in for the phone and links it (needs
+   `sql/20261026_01_employee_mobile_sign_in.sql` and the Edge Function `trimax-accounts`; see
+   `docs/MOBILE_INTEGRATION.md`). If that step fails, the account is kept and the message says so; open
+   the account and press **Create mobile sign-in**.
+6. On the phone: **Set up or reset password**, then the email, the code and a new password.
 
-Signing in on the phone is separate: see `docs/MOBILE_INTEGRATION.md` (Supabase sign-in, then
-**Link mobile sign-in** on the desktop).
+A new code later (expired, or a forgotten phone password): open the account → **Send new setup code**.
 
 Never commit SMTP passwords, provider API keys or service-account credentials to Git.
