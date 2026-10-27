@@ -232,6 +232,26 @@ public class BookingService {
         public boolean fromMobile() {
             return "mobile".equals(createdVia);
         }
+
+        /** Drop-off photos the driver sent (sql/20261025_04); empty when none or the table is missing. */
+        public List<Proof> proofs = new ArrayList<>();
+    }
+
+    /** One drop-off (proof of delivery) photo from the driver app. The photo itself is private. */
+    public static class Proof {
+        public long proofId;
+        public String photoPath;        // path in the private "delivery-proofs" bucket
+        public String driverUsername, driverName, recipientName;
+        public Timestamp takenAt, createdAt;
+        public Double latitude, longitude;
+
+        public Timestamp when() {
+            return takenAt != null ? takenAt : createdAt;
+        }
+
+        public boolean hasGps() {
+            return latitude != null && longitude != null;
+        }
     }
 
     /** The booking was changed by someone else since the admin opened it. */
@@ -330,12 +350,49 @@ public class BookingService {
                 }
             }
             try {
+                d.proofs = loadProofs(conn, bookingId);
+            } catch (SQLException e) {
+                d.proofs = new ArrayList<>();   // optional, like the history
+            }
+            try {
                 d.history = AuditService.load(conn, "booking", String.valueOf(bookingId));
             } catch (SQLException e) {
                 d.history = null;   // history is optional; the booking itself still loads
             }
             return d;
         }
+    }
+
+    /** The booking's drop-off photos, oldest first (empty on a server without public.delivery_proofs). */
+    static List<Proof> loadProofs(Connection conn, int bookingId) throws SQLException {
+        List<Proof> out = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT to_regclass('public.delivery_proofs') IS NOT NULL");
+             ResultSet rs = ps.executeQuery()) {
+            if (!rs.next() || !rs.getBoolean(1)) return out;
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT p.proof_id, p.photo_path, p.driver_username, u.name, p.recipient_name, p.taken_at, p.created_at, "
+                        + "p.latitude, p.longitude FROM public.delivery_proofs p "
+                        + "LEFT JOIN public.users u ON u.username = p.driver_username "
+                        + "WHERE p.booking_id = ? ORDER BY coalesce(p.taken_at, p.created_at), p.proof_id")) {
+            ps.setInt(1, bookingId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Proof p = new Proof();
+                    p.proofId = rs.getLong(1);
+                    p.photoPath = rs.getString(2);
+                    p.driverUsername = rs.getString(3);
+                    p.driverName = rs.getString(4);
+                    p.recipientName = rs.getString(5);
+                    p.takenAt = rs.getTimestamp(6);
+                    p.createdAt = rs.getTimestamp(7);
+                    p.latitude = (Double) rs.getObject(8);
+                    p.longitude = (Double) rs.getObject(9);
+                    out.add(p);
+                }
+            }
+        }
+        return out;
     }
 
     /**
