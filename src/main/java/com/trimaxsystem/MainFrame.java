@@ -134,7 +134,7 @@ public class MainFrame extends JFrame {
         JPanel brandBox = new JPanel();
         brandBox.setOpaque(false);
         brandBox.setLayout(new BoxLayout(brandBox, BoxLayout.Y_AXIS));
-        brandBox.setBorder(new EmptyBorder(22, 22, 18, 16));
+        brandBox.setBorder(new EmptyBorder(16, 22, 10, 16));
         brandBox.add(brand);
         brandBox.add(tagline);
         sidebar.add(brandBox, BorderLayout.NORTH);
@@ -142,14 +142,14 @@ public class MainFrame extends JFrame {
         JPanel nav = new JPanel();
         nav.setOpaque(false);
         nav.setLayout(new BoxLayout(nav, BoxLayout.Y_AXIS));
-        nav.setBorder(new EmptyBorder(4, 12, 4, 12));
+        nav.setBorder(new EmptyBorder(2, 12, 4, 10));
         for (int i = 0; i < PAGES.length; i++) {
             final int index = i;
             NavButton btn = new NavButton(PAGES[i][0]);
             btn.addActionListener(e -> showPage(index));
             navButtons[i] = btn;
             nav.add(btn);
-            nav.add(Box.createVerticalStrut(3));
+            nav.add(Box.createVerticalStrut(2));
         }
         // The list scrolls on short screens, so every page stays reachable.
         JPanel navHolder = new JPanel(new BorderLayout());
@@ -160,7 +160,8 @@ public class MainFrame extends JFrame {
         navScroll.setBorder(BorderFactory.createEmptyBorder());
         navScroll.setOpaque(false);
         navScroll.getViewport().setOpaque(false);
-        navScroll.getVerticalScrollBar().setUnitIncrement(16);
+        // Thin light thumb on the navy, no white track: nothing is covered when the list scrolls.
+        UiKit.slimScrollBar(navScroll.getVerticalScrollBar(), new Color(255, 255, 255, 70), new Color(255, 255, 255, 140));
         sidebar.add(navScroll, BorderLayout.CENTER);
 
         // Signed-in admin, pinned to the bottom (Sign out is in the profile menu at the top right).
@@ -184,7 +185,7 @@ public class MainFrame extends JFrame {
         footer.setOpaque(false);
         footer.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(255, 255, 255, 30)),
-                new EmptyBorder(12, 22, 16, 16)));
+                new EmptyBorder(10, 22, 12, 16)));
         footer.add(whoBox, BorderLayout.CENTER);
         sidebar.add(footer, BorderLayout.SOUTH);
 
@@ -380,6 +381,9 @@ public class MainFrame extends JFrame {
         for (int i = 0; i < navButtons.length; i++) {
             navButtons[i].setSelected(i == index);
         }
+        // Keep the selected entry in view when the sidebar scrolls (e.g. opened from the dashboard).
+        NavButton selected = navButtons[index];
+        SwingUtilities.invokeLater(() -> selected.scrollRectToVisible(new Rectangle(0, -4, selected.getWidth(), selected.getHeight() + 8)));
         setTitle("TRI-MAX - " + PAGES[index][1]);
     }
 
@@ -402,8 +406,9 @@ public class MainFrame extends JFrame {
             setOpaque(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setAlignmentX(Component.LEFT_ALIGNMENT);
-            setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
-            setPreferredSize(new Dimension(180, 38));
+            // 34 px rows: all 16 pages fit on a 1080p screen at 125 % scaling; shorter screens scroll.
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+            setPreferredSize(new Dimension(180, 34));
             addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override
                 public void mouseEntered(java.awt.event.MouseEvent e) {
