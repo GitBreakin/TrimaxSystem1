@@ -40,7 +40,8 @@ public class BookingDetailDialog extends JDialog {
         this.onChanged = onChanged;
 
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
-        setSize(720, 660);
+        // Taller than before for the drop-off photos, but never taller than the screen.
+        setSize(760, Math.min(820, Toolkit.getDefaultToolkit().getScreenSize().height - 60));
         setMinimumSize(new Dimension(560, 480));
         setLocationRelativeTo(owner);
 
@@ -152,7 +153,16 @@ public class BookingDetailDialog extends JDialog {
         // ---- middle: details + items ----
         JPanel middle = new JPanel(new BorderLayout(0, 12));
         middle.setOpaque(false);
-        middle.add(buildInfoCard(d), BorderLayout.NORTH);
+        // Drop-off photos from the driver app, once a driver is on the booking (or photos exist).
+        if (d.driverUsername != null || !d.proofs.isEmpty()) {
+            JPanel upper = new JPanel(new BorderLayout(0, 12));
+            upper.setOpaque(false);
+            upper.add(buildInfoCard(d), BorderLayout.NORTH);
+            upper.add(card(new ProofPhotosPanel(d.proofs, d.deliveryStatus)), BorderLayout.CENTER);
+            middle.add(upper, BorderLayout.NORTH);
+        } else {
+            middle.add(buildInfoCard(d), BorderLayout.NORTH);
+        }
         middle.add(buildItemsCard(d), BorderLayout.CENTER);
         body.add(middle, BorderLayout.CENTER);
 
