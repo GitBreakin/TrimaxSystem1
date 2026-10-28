@@ -21,7 +21,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `20261028_03` Sales & Inventory Intelligence (analysis, settings, inventory alerts) | **Applied 2026-10-28 ~22:20** with the owner's approval (1 transaction). See docs/SALES_INVENTORY_INTELLIGENCE.md |
 | `20261028_04` bad orders (broken, damaged, expired... stock out as a loss in net profit) | **Applied 2026-10-28 ~22:20** with the owner's approval (1 transaction). See docs/BAD_ORDERS.md |
 | `20261028_05` delivery order: nearest to the TRIMAX Hub first (driver app "Seq #", Desktop Bookings) | **Applied 2026-10-28 ~22:36** with the owner's approval (1 transaction), after a dry run on the local production-like copy. After: the 3 functions equal the dry run; the driver list keeps its access (signed-in only, security definer); the bookings, customers and audit log are unchanged. No new APK needed. See docs/DELIVERY_ORDER.md |
-| `20261028_06` bad orders: loss set by hand, 0 pieces for part of one item | **Not applied.** Needs approval. See docs/BAD_ORDERS.md |
+| `20261028_06` bad orders: loss set by hand, 0 pieces for part of one item | **Applied 2026-10-28 ~23:00** with the owner's approval (1 transaction), after a dry run on the local production-like copy. After: the 3 functions and 3 checks equal the dry run; the 8-argument `record_bad_order` older Desktops look for is still there; no API access; products, stock history and the audit log are unchanged. See docs/BAD_ORDERS.md |
 
 `20261028_02` to `_04` were checked in this order:
 - **Before:** the production functions they build on had the same fingerprints as a local rebuild through `20261028_01`.

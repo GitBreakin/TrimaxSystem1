@@ -41,7 +41,7 @@ When it is saved:
 - Net profit = gross profit − payroll − other expenses − **bad orders**.
 - The trend line, the exports and the Dashboard wording say the same.
 
-## Loss set by hand (2026-10-28, `sql/20261028_06_bad_order_custom_loss.sql`)
+## Loss set by hand (2026-10-28, `sql/20261028_06_bad_order_custom_loss.sql`, applied to production ~23:00 with the owner's approval)
 
 Owner's request: sometimes only part of one item is bad, for example one bottle of "Sprite Mismo - 1 pack (6pcs)", worth about ₱10. The puhunan, though, is per pack.
 

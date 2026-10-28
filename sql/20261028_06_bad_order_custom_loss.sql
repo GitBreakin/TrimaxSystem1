@@ -24,7 +24,8 @@
 -- Reports (profit_summary / profit_trend) already add loss_amount: unchanged.
 --
 -- ORDER: after 20261028_04. Re-runnable. Rollback: 20261028_96_rollback_bad_order_custom_loss.sql.
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 23:00 Asia/Manila) with the owner's approval, as migration
+-- 20261028_06_bad_order_custom_loss (one transaction).
 -- =====================================================================================================
 
 begin;
