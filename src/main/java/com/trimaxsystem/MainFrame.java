@@ -23,7 +23,7 @@ public class MainFrame extends JFrame {
             {"Walk-In / In-House", "Walk-In / In-House Sales", "Sell at the store or for a saved customer; receipts, payments and voids"},
             {"Inventory", "Inventory", "Products, puhunan and patong, prices, restocking and stock history"},
             {"Bookings", "Bookings", "All bookings and their status"},
-            {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions (current / stale)"},
+            {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions, and recorded location history"},
             {"Manage Vehicles", "Manage Vehicles", "Vehicle records, status, and driver assignments"},
             {"Agents & Drivers", "Agents & Drivers", "Accounts, roles and account status"},
             {"Attendance", "Attendance", "Start and end of duty from the mobile app, with photo, time and location"},
@@ -106,12 +106,14 @@ public class MainFrame extends JFrame {
     }
 
     /**
-     * Live GPS Monitoring page: read-only maps for the last reported vehicle and agent positions.
+     * Live GPS Monitoring page: read-only maps for the last reported vehicle and agent positions, and the
+     * recorded location history of one agent or driver (Admins only).
      */
     private JComponent buildLiveGpsPage() {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Vehicle map", new LiveGpsPanel());
         tabs.addTab("Agent locations", new AgentLocationsPanel());
+        tabs.addTab("Location history", new LocationHistoryPanel());
         return tabs;
     }
 
@@ -148,6 +150,9 @@ public class MainFrame extends JFrame {
             NavButton btn = new NavButton(PAGES[i][0]);
             btn.addActionListener(e -> showPage(index));
             navButtons[i] = btn;
+            // Notifications open from the bell in the header (with the unread count); a second entry in
+            // the sidebar went to the same page, so it is not shown there.
+            if (i == NOTIFICATIONS_PAGE) continue;
             nav.add(btn);
             nav.add(Box.createVerticalStrut(2));
         }
@@ -227,6 +232,10 @@ public class MainFrame extends JFrame {
     private static final int PROFIT_PAGE = 1;
     private static final int ATTENDANCE_PAGE = 8;
     private static final int NOTIFICATIONS_PAGE = 13;
+    /** How often the bell asks the database for the unread count (no realtime connection on the Desktop). */
+    private static final int BELL_POLL_MS = 30_000;
+    private int lastUnread = -1;
+    private int currentPage = 0;
 
     /**
      * Updates the bell's unread count. If the count cannot be known (table missing, database error) the
@@ -245,6 +254,11 @@ public class MainFrame extends JFrame {
                     int n = get();
                     bell.setIcon(new HeaderIcon(true, n));
                     bell.setToolTipText(n > 0 ? "Notifications (" + n + " unread)" : "Notifications");
+                    // Something new arrived while the Notifications page is open: show it there too.
+                    if (lastUnread >= 0 && n > lastUnread && currentPage == NOTIFICATIONS_PAGE && notificationsPanel != null) {
+                        notificationsPanel.reload();
+                    }
+                    lastUnread = n;
                 } catch (Exception ex) {
                     bell.setIcon(new HeaderIcon(true, 0));
                     bell.setToolTipText("Notifications");
@@ -261,6 +275,12 @@ public class MainFrame extends JFrame {
         bell.getAccessibleContext().setAccessibleName("Notifications");
         bell.addActionListener(e -> showPage(NOTIFICATIONS_PAGE));
         refreshBell();
+        // New notifications (e.g. a booking from an agent) appear on the bell within half a minute.
+        Timer bellPoll = new Timer(BELL_POLL_MS, e -> {
+            if (isShowing()) refreshBell();
+        });
+        bellPoll.setRepeats(true);
+        bellPoll.start();
 
         AuthService.Session session = AuthService.current();
         JButton menuButton = headerIconButton(new HeaderIcon(false, 0), "Profile");
@@ -371,6 +391,7 @@ public class MainFrame extends JFrame {
     // =====================================================
 
     private void showPage(int index) {
+        currentPage = index;
         cardLayout.show(mainContentPanel, PAGES[index][0]);
         titleLabel.setText(PAGES[index][1]);
         if (index == NOTIFICATIONS_PAGE && notificationsPanel != null) notificationsPanel.reload();
@@ -383,7 +404,9 @@ public class MainFrame extends JFrame {
         }
         // Keep the selected entry in view when the sidebar scrolls (e.g. opened from the dashboard).
         NavButton selected = navButtons[index];
-        SwingUtilities.invokeLater(() -> selected.scrollRectToVisible(new Rectangle(0, -4, selected.getWidth(), selected.getHeight() + 8)));
+        if (selected.getParent() != null) {
+            SwingUtilities.invokeLater(() -> selected.scrollRectToVisible(new Rectangle(0, -4, selected.getWidth(), selected.getHeight() + 8)));
+        }
         setTitle("TRI-MAX - " + PAGES[index][1]);
     }
 
@@ -406,7 +429,7 @@ public class MainFrame extends JFrame {
             setOpaque(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setAlignmentX(Component.LEFT_ALIGNMENT);
-            // 34 px rows: all 16 pages fit on a 1080p screen at 125 % scaling; shorter screens scroll.
+            // 34 px rows: all 15 sidebar pages fit on a 1080p screen at 125 % scaling; shorter screens scroll.
             setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
             setPreferredSize(new Dimension(180, 34));
             addMouseListener(new java.awt.event.MouseAdapter() {

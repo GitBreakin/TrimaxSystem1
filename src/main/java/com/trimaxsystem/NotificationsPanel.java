@@ -20,6 +20,7 @@ public class NotificationsPanel extends JPanel {
     private final JButton markOne = UiKit.secondaryButton("Mark selected as read");
     private final JButton markAll = UiKit.secondaryButton("Mark all as read");
     private final JButton resolve = UiKit.secondaryButton("Resolve alert...");
+    private final JButton openBooking = UiKit.primaryButton("Open booking");
     private final JLabel info = new JLabel(" ");
     private final StatePanel state = new StatePanel();
     private final CardLayout cards = new CardLayout();
@@ -53,6 +54,7 @@ public class NotificationsPanel extends JPanel {
         top.add(markOne);
         top.add(markAll);
         top.add(resolve);
+        top.add(openBooking);
         top.add(info);
         add(top, BorderLayout.NORTH);
 
@@ -61,6 +63,20 @@ public class NotificationsPanel extends JPanel {
         markOne.addActionListener(e -> markSelected());
         markAll.addActionListener(e -> markAllRead());
         resolve.addActionListener(e -> resolveSelected());
+        openBooking.addActionListener(e -> openSelectedBooking());
+        openBooking.setToolTipText("Opens the booking this notification is about");
+        // Clicking a "New booking" notification opens that booking (and marks the notification read).
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() != 1 || !SwingUtilities.isLeftMouseButton(e)) return;
+                int r = table.rowAtPoint(e.getPoint());
+                if (r >= 0 && r < shown.size() && shown.get(r).bookingId() != null) {
+                    table.setRowSelectionInterval(r, r);
+                    openSelectedBooking();
+                }
+            }
+        });
         markOne.setToolTipText("For an alert this means acknowledged: the office has seen it");
         filter.setToolTipText("Open alerts = SOS and problem reports that nobody has resolved yet");
         table.setRowHeight(24);
@@ -102,6 +118,7 @@ public class NotificationsPanel extends JPanel {
         markOne.setEnabled(on);
         markAll.setEnabled(on);
         resolve.setEnabled(on);
+        openBooking.setEnabled(on);
     }
 
     private NotificationService.Item selected() {
@@ -115,6 +132,7 @@ public class NotificationsPanel extends JPanel {
         NotificationService.Item it = selected();
         markOne.setEnabled(it != null && it.unread());
         markAll.setEnabled(unread > 0);
+        openBooking.setEnabled(it != null && it.bookingId() != null);
         boolean canResolve = resolutionAvailable && it != null && it.isAlert() && !it.resolved();
         resolve.setEnabled(canResolve);
         resolve.setToolTipText(!resolutionAvailable
@@ -207,7 +225,7 @@ public class NotificationsPanel extends JPanel {
         }
         model.setRowCount(0);
         for (NotificationService.Item it : shown) {
-            model.addRow(new Object[]{it.stateText(), Theme.formatWhen(it.createdAt), it.kind,
+            model.addRow(new Object[]{it.stateText(), Theme.formatWhen(it.createdAt), it.kindLabel(),
                     it.category, it.title, it.reportedBy == null ? "" : it.reportedBy, it.related()});
         }
         detail.setText("");
@@ -277,6 +295,37 @@ public class NotificationsPanel extends JPanel {
                 if (onChanged != null) onChanged.run();
             }
         }.execute();
+    }
+
+    /**
+     * Opens the booking of the selected notification. An unread notification is marked read first (the same
+     * statement as "Mark selected as read"), so the bell count drops once it has been looked at.
+     */
+    private void openSelectedBooking() {
+        NotificationService.Item it = selected();
+        if (it == null || it.bookingId() == null || busy) return;
+        int bookingId = it.bookingId();
+        if (it.unread()) {
+            new SwingWorker<Integer, Void>() {
+                @Override
+                protected Integer doInBackground() throws Exception {
+                    return NotificationService.markRead(it.id);
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        get();
+                    } catch (Exception ignored) {
+                        // Still unread; the list below shows what the database says.
+                    }
+                    if (onChanged != null) onChanged.run();
+                }
+            }.execute();
+        }
+        new BookingDetailDialog(SwingUtilities.getWindowAncestor(this), bookingId, null).setVisible(true);
+        load();   // after the booking window closes: fresh states (read, and anything new)
+        if (onChanged != null) onChanged.run();
     }
 
     private static String esc(String s) {

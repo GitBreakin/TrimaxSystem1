@@ -78,6 +78,29 @@ public class TileMapView extends JPanel {
         }
     }
 
+    /**
+     * One RECORDED GPS point of a route (Location History). Points are joined in the given (time) order with
+     * straight lines inside a segment; a new segment number means there was no data in between, and that
+     * part is drawn as a thin dashed grey line, never as a route. Straight lines are not the roads taken.
+     */
+    public static final class RoutePoint {
+        public final String id;
+        public final double lat, lon;
+        public final int segment;
+        public final String tooltipHtml;
+
+        public RoutePoint(String id, double lat, double lon, int segment, String tooltipHtml) {
+            this.id = id;
+            this.lat = lat;
+            this.lon = lon;
+            this.segment = segment;
+            this.tooltipHtml = tooltipHtml;
+        }
+    }
+
+    private static final Color ROUTE      = Color.decode("#2563EB");
+    private static final Color ROUTE_GAP  = Color.decode("#94A3B8");
+
     private static final int TILE = 256;
     private static final int MIN_ZOOM = 3;
     private static final int MAX_ZOOM = 18;
@@ -114,6 +137,7 @@ public class TileMapView extends JPanel {
     private String banner = null;               // one-line notice at the top (for example "showing old data")
     private boolean bannerIsError = false;
     private double[] line = null;               // lat1, lon1, lat2, lon2
+    private List<RoutePoint> route = new ArrayList<>();
     private String lineLabel = "";
     private boolean pendingFit = false;
     private boolean needsInitialFit = true;
@@ -162,7 +186,9 @@ public class TileMapView extends JPanel {
                     return;
                 }
                 Marker m = markerAt(e.getX(), e.getY());
+                RoutePoint rp = m == null ? routePointAt(e.getX(), e.getY()) : null;
                 if (m != null && onMarkerClick != null) onMarkerClick.accept(m.id);
+                else if (rp != null && onMarkerClick != null) onMarkerClick.accept(rp.id);
                 else if (m == null && pickMode && onMapClick != null && e.getClickCount() == 1) {
                     onMapClick.accept(yToLat(cy + e.getY() - getHeight() / 2.0, zoom),
                             xToLon(cx + e.getX() - getWidth() / 2.0, zoom));
@@ -171,7 +197,7 @@ public class TileMapView extends JPanel {
 
             @Override
             public void mouseMoved(MouseEvent e) {
-                setCursor(markerAt(e.getX(), e.getY()) != null
+                setCursor(markerAt(e.getX(), e.getY()) != null || routePointAt(e.getX(), e.getY()) != null
                         ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                         : pickMode ? Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR) : Cursor.getDefaultCursor());
             }
@@ -289,8 +315,25 @@ public class TileMapView extends JPanel {
         repaint();
     }
 
+    /** Draws recorded GPS points joined in order (see {@link RoutePoint}); an empty list removes the route. */
+    public void setRoute(List<RoutePoint> points) {
+        this.route = points == null ? new ArrayList<>() : new ArrayList<>(points);
+        repaint();
+    }
+
     /** Centres on a marker (zooming in a bit if the map is zoomed far out). */
     public void focusMarker(String id) {
+        for (RoutePoint rp : route) {
+            if (rp.id.equals(id)) {
+                if (zoom < 15) zoom = 16;
+                cx = lonToX(rp.lon, zoom);
+                cy = latToY(rp.lat, zoom);
+                clampCenter();
+                selectedId = id;
+                repaint();
+                return;
+            }
+        }
         for (Marker m : markers) {
             if (m.id.equals(id)) {
                 if (zoom < 13) zoom = 14;
@@ -354,7 +397,7 @@ public class TileMapView extends JPanel {
     }
 
     private void doFit(int w, int h) {
-        if (markers.isEmpty()) {
+        if (markers.isEmpty() && route.isEmpty()) {
             zoom = 11;
             cx = lonToX(120.9842, zoom);
             cy = latToY(14.5995, zoom);
@@ -363,6 +406,12 @@ public class TileMapView extends JPanel {
         }
         double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
         for (Marker m : markers) {
+            minLat = Math.min(minLat, m.lat);
+            maxLat = Math.max(maxLat, m.lat);
+            minLon = Math.min(minLon, m.lon);
+            maxLon = Math.max(maxLon, m.lon);
+        }
+        for (RoutePoint m : route) {
             minLat = Math.min(minLat, m.lat);
             maxLat = Math.max(maxLat, m.lat);
             minLon = Math.min(minLon, m.lon);
@@ -441,6 +490,7 @@ public class TileMapView extends JPanel {
             }
             paintTiles(g, w, h);
             paintLine(g, w, h);
+            paintRoute(g, w, h);
             paintMarkers(g, w, h);
             paintOverlays(g, w, h);
             if (isFocusOwner()) {
@@ -502,6 +552,47 @@ public class TileMapView extends JPanel {
         if (!lineLabel.isEmpty()) {
             drawChip(g, lineLabel, (a.x + b.x) / 2, (a.y + b.y) / 2 - 14, true, Theme.NAVY);
         }
+    }
+
+    private void paintRoute(Graphics2D g, int w, int h) {
+        if (route.isEmpty()) return;
+        Stroke solid = new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+        Stroke gap = new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 0f, new float[]{4f, 7f}, 0f);
+        Point prev = null;
+        RoutePoint prevPoint = null;
+        for (RoutePoint rp : route) {
+            Point p = toScreen(rp.lat, rp.lon, w, h);
+            if (prev != null) {
+                boolean sameSegment = prevPoint.segment == rp.segment;
+                g.setColor(sameSegment ? ROUTE : ROUTE_GAP);
+                g.setStroke(sameSegment ? solid : gap);
+                g.drawLine(prev.x, prev.y, p.x, p.y);
+            }
+            prev = p;
+            prevPoint = rp;
+        }
+        g.setStroke(new BasicStroke(1.5f));
+        RoutePoint selected = null;
+        for (RoutePoint rp : route) {
+            Point p = toScreen(rp.lat, rp.lon, w, h);
+            if (p.x < -10 || p.y < -10 || p.x > w + 10 || p.y > h + 10) continue;
+            if (rp.id.equals(selectedId)) selected = rp;
+            g.setColor(Color.WHITE);
+            g.fillOval(p.x - 4, p.y - 4, 8, 8);
+            g.setColor(ROUTE);
+            g.drawOval(p.x - 4, p.y - 4, 8, 8);
+        }
+        if (selected != null) {
+            Point p = toScreen(selected.lat, selected.lon, w, h);
+            g.setColor(new Color(37, 99, 235, 70));
+            g.fillOval(p.x - 13, p.y - 13, 26, 26);
+            g.setColor(ROUTE);
+            g.fillOval(p.x - 6, p.y - 6, 12, 12);
+            g.setColor(Color.WHITE);
+            g.setStroke(new BasicStroke(2f));
+            g.drawOval(p.x - 6, p.y - 6, 12, 12);
+        }
+        g.setStroke(new BasicStroke(1f));
     }
 
     private void paintMarkers(Graphics2D g, int w, int h) {
@@ -673,10 +764,27 @@ public class TileMapView extends JPanel {
         return null;
     }
 
+    private RoutePoint routePointAt(int mx, int my) {
+        int w = getWidth(), h = getHeight();
+        RoutePoint best = null;
+        double bestD = 8;
+        for (RoutePoint rp : route) {
+            Point p = toScreen(rp.lat, rp.lon, w, h);
+            double d = Math.hypot(p.x - mx, p.y - my);
+            if (d <= bestD) {
+                best = rp;
+                bestD = d;
+            }
+        }
+        return best;
+    }
+
     @Override
     public String getToolTipText(MouseEvent e) {
         Marker m = markerAt(e.getX(), e.getY());
-        return m == null ? null : m.tooltipHtml;
+        if (m != null) return m.tooltipHtml;
+        RoutePoint rp = routePointAt(e.getX(), e.getY());
+        return rp == null ? null : rp.tooltipHtml;
     }
 
     private JButton makeMapButton(String text, int x, int y, int w, int h, String tip, Runnable action) {

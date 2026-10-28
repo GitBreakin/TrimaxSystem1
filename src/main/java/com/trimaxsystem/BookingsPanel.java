@@ -369,10 +369,17 @@ public class BookingsPanel extends JPanel {
         });
 
         table.getSelectionModel().addListSelectionListener(e -> btnView.setEnabled(table.getSelectedRow() >= 0));
+        // One click on a booking opens it (Enter does the same from the keyboard).
+        table.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        table.setToolTipText("Click a booking to open it");
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2 && table.getSelectedRow() >= 0) openDetails();
+                if (e.getClickCount() != 1 || !SwingUtilities.isLeftMouseButton(e)) return;
+                int row = table.rowAtPoint(e.getPoint());
+                if (row < 0) return;
+                table.setRowSelectionInterval(row, row);
+                openDetails();
             }
         });
         table.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("ENTER"), "details");

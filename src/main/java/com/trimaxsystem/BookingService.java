@@ -460,7 +460,31 @@ public class BookingService {
     public static boolean assignDriver(int bookingId, String expectedStatus, String expectedDriver,
                                        DriverOption newDriver)
             throws SQLException, AuthService.AuthException, ConflictException {
+        return assign(bookingId, expectedStatus, expectedDriver, newDriver, false);
+    }
+
+    /**
+     * Confirms a Pending booking AND assigns its driver in one transaction (one click for the Admin).
+     * Same checks as {@link #assignDriver} (admin re-checked in the database, driver active with an Available
+     * vehicle, the booking still Pending with the driver the admin saw), plus the status change
+     * Pending -> Confirmed. Either both happen or neither: a failure leaves the booking exactly as it was.
+     * Both changes are audited, as when they are done one after the other.
+     */
+    public static boolean confirmAndAssignDriver(int bookingId, String expectedDriver, DriverOption newDriver)
+            throws SQLException, AuthService.AuthException, ConflictException {
+        return assign(bookingId, BookingStatus.PENDING, expectedDriver, newDriver, true);
+    }
+
+    private static boolean assign(int bookingId, String expectedStatus, String expectedDriver,
+                                  DriverOption newDriver, boolean confirm)
+            throws SQLException, AuthService.AuthException, ConflictException {
         AuthService.requireAdmin();
+        if (newDriver == null) {
+            throw new IllegalStateException("Choose a driver.");
+        }
+        if (confirm && !BookingStatus.PENDING.equals(expectedStatus)) {
+            throw new IllegalStateException("Only a Pending booking can be confirmed.");
+        }
         if (!canAssignDriver(expectedStatus)) {
             throw new IllegalStateException("The driver can only be changed while the booking is Pending or Confirmed.");
         }
@@ -480,9 +504,11 @@ public class BookingService {
                         }
                     }
                 }
+                // The status column is only written when confirming, so a plain (re)assignment fires no status trigger.
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "UPDATE bookings SET driver_username = ?, vehicle_id = ? "
-                                + "WHERE booking_id = ? AND status = ? AND driver_username IS NOT DISTINCT FROM ?")) {
+                        "UPDATE bookings SET driver_username = ?, vehicle_id = ?"
+                                + (confirm ? ", status = '" + BookingStatus.CONFIRMED + "'" : "")
+                                + " WHERE booking_id = ? AND status = ? AND driver_username IS NOT DISTINCT FROM ?")) {
                     ps.setString(1, newDriver.username);
                     ps.setString(2, newDriver.vehicleId);
                     ps.setInt(3, bookingId);
@@ -492,6 +518,10 @@ public class BookingService {
                         throw new ConflictException("This booking was changed by someone else. "
                                 + "It has been reloaded; please check it and try again.");
                     }
+                }
+                if (confirm) {
+                    AuditService.record(conn, "booking.status_change", "booking", String.valueOf(bookingId), "success",
+                            BookingStatus.PENDING + " -> " + BookingStatus.CONFIRMED + " (with driver assignment)");
                 }
                 boolean audited = AuditService.record(conn, "booking.assign_driver", "booking",
                         String.valueOf(bookingId), "success",
