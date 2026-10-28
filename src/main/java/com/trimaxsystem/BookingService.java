@@ -211,6 +211,11 @@ public class BookingService {
         public String deliveryStatus;                  // see DeliveryStatus
         public Timestamp deliveryStatusAt;
 
+        // Delivery order (sql/20261028_05; all null before it). deliveryOrderKnown: the server has it.
+        public boolean deliveryOrderKnown;
+        public Integer deliverySeq, deliveryCount;     // #seq of count in the driver's unfinished deliveries
+        public Double hubDistanceM;                    // straight line from the TRIMAX Hub; null without a pin
+
         // Agent discount (sql/20261027_01; null / zero before it and for bookings without a discount)
         public BigDecimal subtotal, discountAmount, discountValue;
         public String discountType, discountBy;
@@ -328,6 +333,24 @@ public class BookingService {
                             d.instructions = rs.getString(7);
                             d.deliveryStatus = rs.getString(8);
                             d.deliveryStatusAt = rs.getTimestamp(9);
+                        }
+                    }
+                }
+                if (DeliveryOrder.isInstalled(conn)) {
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "SELECT " + DeliveryOrder.DISTANCE_SQL + ", ds.seq, "
+                                    + "(SELECT count(*) FROM trimax_private.delivery_sequence(b.driver_username)) "
+                                    + "FROM bookings b LEFT JOIN clients c ON c.client_id = b.client_id "
+                                    + "LEFT JOIN trimax_private.delivery_sequence(b.driver_username) ds ON ds.booking_id = b.booking_id "
+                                    + "WHERE b.booking_id = ?")) {
+                        ps.setInt(1, bookingId);
+                        try (ResultSet rs = ps.executeQuery()) {
+                            if (rs.next()) {
+                                d.deliveryOrderKnown = true;
+                                d.hubDistanceM = (Double) rs.getObject(1);
+                                d.deliverySeq = (Integer) rs.getObject(2);
+                                if (d.deliverySeq != null) d.deliveryCount = rs.getInt(3);
+                            }
                         }
                     }
                 }

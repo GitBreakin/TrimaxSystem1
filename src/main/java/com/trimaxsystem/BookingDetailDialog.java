@@ -198,6 +198,10 @@ public class BookingDetailDialog extends JDialog {
         if (d.instructions != null) addRow(grid, r++, "Instructions", d.instructions);
         addRow(grid, r++, "Driver", driver);
         addRow(grid, r++, "Vehicle", vehicle);
+        if (d.deliveryOrderKnown) {
+            addRow(grid, r++, d.deliverySeq == null ? "From hub" : "Delivery order",
+                    DeliveryOrder.detail(d.deliverySeq, d.deliveryCount, d.deliverySeq == null ? null : driver, d.hubDistanceM));
+        }
         if (d.driverUsername != null && d.deliveryStatus != null) {
             addRow(grid, r++, "Delivery", DeliveryStatus.label(d.deliveryStatus)
                     + (d.deliveryStatusAt == null ? "" : "  (" + Theme.formatWhen(d.deliveryStatusAt) + ")")
