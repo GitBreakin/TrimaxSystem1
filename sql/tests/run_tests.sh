@@ -250,4 +250,18 @@ psql_owner -f 20261028_04_bad_orders.sql
 check "select count(*) = 3 from pg_proc where proname in ('record_bad_order', 'void_bad_order', 'bad_order_label')" "bad orders re-apply after rollback"
 check "select count(*) = $bo_rows from bad_orders" "re-apply continues from the same bad orders"
 check "select bad_orders_count > 0 and net_profit = gross_profit - payroll_paid - payroll_unpaid - other_expenses - bad_orders_loss from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after re-apply the report counts the bad orders again"
+echo "== Delivery order: nearest to the TRIMAX Hub first (twice: re-runnable)"
+psql_owner -f 20261028_05_delivery_order_nearest_hub.sql
+psql_owner -f 20261028_05_delivery_order_nearest_hub.sql
+psql_su -d "$DB" -f tests/52_delivery_order_tests.sql > "/tmp/$DB.52.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL DELIVERY ORDER/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.52.log"
+grep -q '^ALL DELIVERY ORDER SQL TESTS PASSED' "/tmp/$DB.52.log" || { echo "FAIL delivery order tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.52.log"
+echo "== Delivery order rollback, then re-apply"
+psql_owner -f 20261028_95_rollback_delivery_order_nearest_hub.sql
+check "select count(*) = 0 from pg_proc where proname in ('delivery_sequence', 'hub_distance_m')" "rollback removed delivery_sequence and hub_distance_m"
+check "select prosrc not like '%delivery_sequence%' and prosrc like '%when ''In Progress'' then 0%' from pg_proc where proname = 'trimax_driver_list_deliveries'" "rollback put back the previous driver list order"
+check "select has_function_privilege('authenticated', 'public.trimax_driver_list_deliveries(text)', 'execute') and not has_function_privilege('anon', 'public.trimax_driver_list_deliveries(text)', 'execute')" "after rollback the driver list keeps its access"
+psql_owner -f 20261028_05_delivery_order_nearest_hub.sql
+check "select count(*) = 2 from pg_proc where proname in ('delivery_sequence', 'hub_distance_m') and prosrc <> ''" "delivery order re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"

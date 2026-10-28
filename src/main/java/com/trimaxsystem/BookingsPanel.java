@@ -28,19 +28,24 @@ import javax.swing.table.JTableHeader;
  * Bookings created in the Android app are ordinary rows here. The Delivery column flags new mobile
  * bookings and shows the driver's progress; the list refreshes itself every 30 seconds while it is on
  * screen (polling, not realtime) so driver updates appear without pressing Refresh.
+ *
+ * "Order · km" (sql/20261028_05): the driver's delivery order (#1 first: nearest to the TRIMAX Hub,
+ * the same numbers the driver app shows) and every booking's distance from the hub. Choosing one driver
+ * in the filter sorts the list in that driver's order.
  */
 public class BookingsPanel extends JPanel {
 
     private static final int PAGE_SIZE = 25;
     private static final String TZ_SQL = "Asia/Manila";
 
-    private static final String[] COLS = {"Booking", "Customer", "Date / Time", "Items", "Total", "Driver", "Status", "Delivery"};
+    private static final String[] COLS = {"Booking", "Customer", "Date / Time", "Items", "Total", "Driver",
+            "Order \u00B7 km", "Status", "Delivery"};
     /** ORDER BY expression for each column. Only these fixed strings are ever put into the query. */
     private static final String[] SORT_SQL = {
             "b.booking_id", "LOWER(c.client_name)", "b.transc_date", "item_count",
-            "b.total_amount", "LOWER(COALESCE(u.name, 'Unassigned'))", "b.status",
+            "b.total_amount", "LOWER(COALESCE(u.name, 'Unassigned'))", DeliveryOrder.SORT_SQL, "b.status",
             "COALESCE(b.delivery_status, CASE WHEN b.created_via = 'mobile' THEN '0' ELSE '' END)"};
-    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_STATUS = 6, COL_DELIVERY = 7;
+    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_ORDER = 6, COL_STATUS = 7, COL_DELIVERY = 8;
     private static final int AUTO_REFRESH_MS = 30_000;
     private static final java.time.format.DateTimeFormatter CLOCK = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
 
@@ -314,6 +319,9 @@ public class BookingsPanel extends JPanel {
                     // The status is always written out; the colour is only a second cue.
                     setForeground(Theme.statusColor(text));
                     setFont(Theme.NAV_ON);
+                } else if (col == COL_ORDER) {
+                    if (text.startsWith("#")) setFont(Theme.NAV_ON);
+                    else setForeground(Theme.MUTED);
                 } else if (col == COL_DELIVERY) {
                     if (DeliveryStatus.label(DeliveryStatus.FAILED).equals(text)) {
                         setForeground(Theme.DANGER);
@@ -334,7 +342,8 @@ public class BookingsPanel extends JPanel {
         header.setReorderingAllowed(false);
         header.setPreferredSize(new Dimension(100, 34));
         header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        header.setToolTipText("Click a column to sort");
+        header.setToolTipText("Click a column to sort. Order \u00B7 km: the driver's delivery order "
+                + "(#1 = nearest to the TRIMAX Hub, as in the driver app) and the distance from the hub");
         header.setDefaultRenderer(new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable t, Object value, boolean sel,
@@ -361,7 +370,7 @@ public class BookingsPanel extends JPanel {
                     sortAsc = !sortAsc;
                 } else {
                     sortCol = col;
-                    sortAsc = !(col == 2 || col == COL_ITEMS || col == COL_TOTAL);   // dates/numbers: biggest first
+                    sortAsc = !(col == 2 || col == COL_ITEMS || col == COL_TOTAL);   // dates/numbers: biggest first; order: #1 first
                 }
                 page = 0;
                 load();
@@ -421,6 +430,11 @@ public class BookingsPanel extends JPanel {
             return;
         }
         lblFilterError.setText(" ");
+        if (f.driverUsername != null && !f.driverUsername.equals(applied.driverUsername)) {
+            // One driver chosen: show that driver's deliveries in delivery order (#1 first).
+            sortCol = COL_ORDER;
+            sortAsc = true;
+        }
         applied = f;
         page = 0;
         load();
@@ -605,7 +619,8 @@ public class BookingsPanel extends JPanel {
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Without the mobile integration installed the Delivery column stays empty and sorts by booking.
             boolean mobile = MobileIntegration.isInstalled(conn);
-            String sortSql = sc == COL_DELIVERY && !mobile ? SORT_SQL[COL_ID] : SORT_SQL[sc];
+            boolean order = mobile && DeliveryOrder.isInstalled(conn);
+            String sortSql = (sc == COL_DELIVERY && !mobile) || (sc == COL_ORDER && !order) ? SORT_SQL[COL_ID] : SORT_SQL[sc];
             String countSql = "SELECT COUNT(*)" + FROM_WHERE_BASE + where;
             String dataSql = "SELECT b.booking_id, c.client_name, "
                     + "to_char(b.transc_date AT TIME ZONE '" + TZ_SQL + "', 'YYYY-MM-DD HH24:MI'), "
@@ -613,7 +628,10 @@ public class BookingsPanel extends JPanel {
                     + "b.total_amount, COALESCE(u.name, 'Unassigned'), b.status, "
                     + (mobile ? "b.created_via, b.driver_username, b.delivery_status"
                               : "NULL::text, NULL::text, NULL::text")
-                    + FROM_WHERE_BASE + where
+                    + (order ? ", ds.seq, " + DeliveryOrder.DISTANCE_SQL : ", NULL::integer, NULL::double precision")
+                    + FROM_WHERE_BASE
+                    + (order ? "LEFT JOIN " + DeliveryOrder.SEQUENCE_SQL + " ds ON ds.booking_id = b.booking_id " : "")
+                    + where
                     + " ORDER BY " + sortSql + (asc ? " ASC" : " DESC") + ", b.booking_id DESC"
                     + " LIMIT ? OFFSET ?";
 
@@ -630,9 +648,15 @@ public class BookingsPanel extends JPanel {
                 ps.setLong(next + 2, (long) pageNo * PAGE_SIZE);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
+                        int seq = rs.getInt(11);
+                        Integer seqOrNull = rs.wasNull() ? null : seq;
+                        double meters = rs.getDouble(12);
+                        Double metersOrNull = rs.wasNull() ? null : meters;
                         r.rows.add(new Object[]{
                                 rs.getInt(1), rs.getString(2), rs.getString(3), rs.getInt(4),
-                                rs.getBigDecimal(5), rs.getString(6), rs.getString(7),
+                                rs.getBigDecimal(5), rs.getString(6),
+                                order ? DeliveryOrder.cell(seqOrNull, metersOrNull) : "",
+                                rs.getString(7),
                                 mobile ? DeliveryStatus.listLabel(rs.getString(8), rs.getString(9), rs.getString(10)) : ""});
                     }
                 }
