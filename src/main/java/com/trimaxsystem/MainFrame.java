@@ -281,6 +281,12 @@ public class MainFrame extends JFrame {
         });
         bellPoll.setRepeats(true);
         bellPoll.start();
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosed(java.awt.event.WindowEvent e) {
+                bellPoll.stop();   // signed out or closed: stop asking
+            }
+        });
 
         AuthService.Session session = AuthService.current();
         JButton menuButton = headerIconButton(new HeaderIcon(false, 0), "Profile");
