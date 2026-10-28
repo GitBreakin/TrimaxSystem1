@@ -28,7 +28,8 @@
 --
 -- ORDER: after 20261028_06. Re-runnable. Rollback: 20261028_97_rollback_half_case.sql (only while no half
 -- case was ever sold and no stock ends in .5; it refuses otherwise and changes nothing).
--- NOT APPLIED to production. Needs the owner's approval first. Install the new Desktop and APK the same day (docs/HALF_CASE.md).
+-- APPLIED to production 2026-10-29 00:05 (Asia/Manila) with the owner's approval (1 transaction). Install the new
+-- Desktop and APK before setting any half case price (docs/HALF_CASE.md).
 -- =====================================================================================================
 
 begin;

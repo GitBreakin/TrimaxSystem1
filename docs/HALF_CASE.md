@@ -8,7 +8,7 @@ Owner's decisions:
 - **Price:** the **Admin sets a half case price** per product. A product without one is sold by the whole case only.
 - **Where:** **both** the agent's booking (Android) and Walk-In / In-House sales (Desktop).
 
-Database update: `sql/20261028_07_half_case.sql`. Rollback: `sql/20261028_97_rollback_half_case.sql`.
+Database update: `sql/20261028_07_half_case.sql`, **applied to production 2026-10-29 00:05** with the owner's approval. Rollback: `sql/20261028_97_rollback_half_case.sql`.
 The rollback only works while no half case was ever booked or sold. If one was, it refuses and changes nothing.
 
 ## For the Admin (Desktop)
@@ -70,7 +70,7 @@ Tests:
 
 ## Install together
 
-Apply `20261028_07`, then install the new Desktop and APK the same day. Older versions keep working, with these limits:
+`20261028_07` is applied. Install the new Desktop and APK **before setting any half case price**: no half case line can exist until a product has one. Older versions keep working, with these limits:
 - An **older Desktop** shows a stock of 9.5 as 9.
 - An **older Desktop** that cancels a booking with half cases gives back 1 per half case instead of 0.5.
 - An **older APK** rounds 7.5 to 8 in the stock it shows (the server still refuses more than the stock).
