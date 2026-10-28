@@ -187,4 +187,23 @@ check "select count(*) = $disc_lines from booking_items where discount_per_unit 
 psql_owner -f 20261027_04_per_item_discounts.sql
 check "select pronargs = 11 from pg_proc where proname = 'save_product'" "per-item discounts re-apply after rollback"
 check "select count(*) = 0 from bookings b where b.subtotal_amount is not null and b.total_amount <> b.subtotal_amount - b.discount_amount" "after re-apply every booking total = subtotal - discount"
+echo "== Location history and new-booking notifications (twice: re-runnable)"
+psql_owner -f 20261028_01_location_history_and_booking_notifications.sql
+psql_owner -f 20261028_01_location_history_and_booking_notifications.sql
+psql_su -d "$DB" -f tests/49_location_history_and_booking_notifications_tests.sql > "/tmp/$DB.49.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL LOCATION HISTORY/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.49.log"
+grep -q '^ALL LOCATION HISTORY AND BOOKING NOTIFICATION SQL TESTS PASSED' "/tmp/$DB.49.log" || { echo "FAIL location history / booking notification tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.49.log"
+echo "== Location history rollback, then re-apply"
+hist_rows="$(psql_owner -tAc "select count(*) from trimax_private.location_history")"
+nb_rows="$(psql_owner -tAc "select count(*) from admin_notifications where category = 'New booking'")"
+psql_owner -f 20261028_90_rollback_location_history_and_booking_notifications.sql
+check "select count(*) = 0 from pg_proc where proname in ('location_history_for', 'purge_location_history', 'bookings_notify_new', 'distance_m')" "rollback removed the history and notification functions"
+check "select count(*) = 0 from pg_trigger where tgname = 'trimax_bookings_notify_new'" "rollback removed the new-booking trigger"
+check "select prosrc not like '%location_history%' from pg_proc where proname = 'trimax_update_location'" "rollback put back the location call without history"
+check "select count(*) = $hist_rows from trimax_private.location_history" "rollback kept the location history ($hist_rows samples)"
+check "select count(*) = $nb_rows from admin_notifications where category = 'New booking'" "rollback kept the notifications ($nb_rows)"
+psql_owner -f 20261028_01_location_history_and_booking_notifications.sql
+check "select count(*) = 4 from pg_proc where proname in ('location_history_for', 'purge_location_history', 'bookings_notify_new', 'distance_m')" "location history re-applies after rollback"
+check "select count(*) = $hist_rows from trimax_private.location_history" "re-apply continues from the same history"
 echo "ALL DATABASE TESTS PASSED"

@@ -12,8 +12,9 @@ import java.util.Set;
 
 /**
  * Reads admin notifications from admin_notifications, marks them read (acknowledged) and resolves alerts.
- * Alerts are SOS / problem reports sent from the mobile app (trimax_report_issue); this app does not create
- * notifications and cannot send announcements to anyone, so no delivery is ever claimed.
+ * Alerts are SOS / problem reports sent from the mobile app (trimax_report_issue). "New booking" notices are
+ * added by the database itself when an agent's booking is saved (sql/20261028_01; one per booking). This app
+ * does not create notifications and cannot send announcements to anyone, so no delivery is ever claimed.
  *
  * Resolving needs the database update sql/20261025_07_alert_resolution.sql. Without it the page still
  * works (read / mark read) and says that resolving is not available yet. A missing table is reported as
@@ -22,6 +23,8 @@ import java.util.Set;
 public final class NotificationService {
 
     private static final String TABLE_MISSING = "42P01";
+    /** Category of the notification the database adds when an agent's booking is saved (sql/20261028_01). */
+    public static final String NEW_BOOKING = "New booking";
     private static final int LIMIT = 200;
     public static final int MAX_NOTE = 1000;
 
@@ -49,7 +52,23 @@ public final class NotificationService {
         }
 
         public String related() {
+            if (bookingId() != null) return "Booking #" + relatedId;
             return relatedType == null || relatedId == null ? "" : relatedType + " " + relatedId;
+        }
+
+        /** The booking this notification is about (a new booking from an agent, sql/20261028_01), or null. */
+        public Integer bookingId() {
+            if (!"booking".equals(relatedType) || relatedId == null) return null;
+            try {
+                return Integer.valueOf(relatedId.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        /** What the Kind column says: "Booking" for a new booking from an agent, else the stored kind. */
+        public String kindLabel() {
+            return NEW_BOOKING.equals(category) ? "Booking" : kind;
         }
 
         /** Short state for the list: Unread / Acknowledged / Resolved (alerts), Unread / Read (announcements). */

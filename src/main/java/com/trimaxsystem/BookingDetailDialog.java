@@ -148,6 +148,10 @@ public class BookingDetailDialog extends JDialog {
             top.add(n);
         }
         top.setBorder(new EmptyBorder(0, 0, 12, 0));
+        JComponent next = buildNextStep(d);
+        next.setAlignmentX(Component.LEFT_ALIGNMENT);
+        top.add(Box.createVerticalStrut(10));
+        top.add(next);
         body.add(top, BorderLayout.NORTH);
 
         // ---- middle: details + items ----
@@ -289,6 +293,81 @@ public class BookingDetailDialog extends JDialog {
         return card(p);
     }
 
+    /**
+     * The "Next step" box: who is assigned, and the one highlighted action for this booking (Confirm &amp;
+     * assign driver, Confirm, Assign driver or Print receipt; see {@link BookingActions}). The receipt
+     * buttons only exist once a driver is saved on the booking.
+     */
+    private JComponent buildNextStep(BookingService.Detail d) {
+        JPanel box = new JPanel();
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.setBackground(Color.decode("#EFF6FF"));
+        box.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Color.decode("#BFDBFE")), new EmptyBorder(10, 12, 10, 12)));
+
+        String driver = BookingActions.hasDriver(d.driverUsername)
+                ? (d.driverName == null ? d.driverUsername : d.driverName + " (" + d.driverUsername + ")")
+                  + (d.vehicleId == null ? "" : "  -  vehicle " + d.vehicleId)
+                : "No driver yet";
+        JLabel who = new JLabel("Driver: " + driver);
+        who.setFont(new Font("SansSerif", Font.BOLD, 13));
+        who.setForeground(Theme.TEXT);
+        who.setAlignmentX(Component.LEFT_ALIGNMENT);
+        String nextText = BookingActions.nextStepText(d.status, d.driverUsername);
+        JLabel what = new JLabel(nextText == null ? " " : nextText);
+        what.setFont(Theme.SUBTLE);
+        what.setForeground(Theme.MUTED);
+        what.setAlignmentX(Component.LEFT_ALIGNMENT);
+        box.add(who);
+        box.add(Box.createVerticalStrut(2));
+        box.add(what);
+
+        JPanel row = UiKit.flowRow();
+        row.setBorder(new EmptyBorder(6, -8, 0, 0));
+        switch (BookingActions.primary(d.status, d.driverUsername)) {
+            case CONFIRM_AND_ASSIGN: {
+                JButton b = UiKit.primaryButton("Confirm & assign driver");
+                b.setToolTipText("Confirms the booking and assigns the driver you choose, in one step");
+                b.addActionListener(e -> chooseAndAssignDriver(true));
+                row.add(b);
+                break;
+            }
+            case CONFIRM: {
+                JButton b = UiKit.primaryButton("Confirm booking");
+                b.addActionListener(e -> confirmAndChange(BookingStatus.CONFIRMED));
+                row.add(b);
+                break;
+            }
+            case ASSIGN: {
+                JButton b = UiKit.primaryButton("Assign driver");
+                b.addActionListener(e -> chooseAndAssignDriver(false));
+                row.add(b);
+                break;
+            }
+            default:
+                break;
+        }
+        if (BookingActions.canPrint(d.driverUsername)) {
+            boolean main = BookingActions.primary(d.status, d.driverUsername) == BookingActions.Primary.PRINT;
+            JButton print = main ? UiKit.primaryButton("Print receipt") : UiKit.secondaryButton("Print receipt");
+            print.addActionListener(e -> withSavedDriver(this::printReceipt));
+            JButton save = UiKit.secondaryButton("Save receipt PDF");
+            save.addActionListener(e -> withSavedDriver(this::saveReceipt));
+            row.add(print);
+            row.add(save);
+        }
+        if (BookingActions.canChangeDriver(d.status, d.driverUsername, d.deliveryStatus)) {
+            JButton change = UiKit.secondaryButton("Change driver");
+            change.addActionListener(e -> chooseAndAssignDriver(false));
+            row.add(change);
+        }
+        if (row.getComponentCount() > 0) {
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            box.add(row);
+        }
+        return box;
+    }
+
     private JComponent buildActions(BookingService.Detail d) {
         JPanel p = new JPanel();
         p.setOpaque(false);
@@ -302,18 +381,6 @@ public class BookingDetailDialog extends JDialog {
         row.setOpaque(false);
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JButton saveReceipt = button("Save receipt PDF", false);
-        saveReceipt.addActionListener(e -> saveReceipt(d));
-        row.add(saveReceipt);
-        JButton printReceipt = button("Print receipt", false);
-        printReceipt.addActionListener(e -> printReceipt(d));
-        row.add(printReceipt);
-
-        if (BookingService.canAssignDriver(d.status)) {
-            JButton assign = button(d.driverUsername == null ? "Assign driver" : "Change driver", false);
-            assign.addActionListener(e -> chooseAndAssignDriver());
-            row.add(assign);
-        }
         List<String> next = BookingStatus.next(d.status);
         if (next.isEmpty()) {
             JLabel fin = new JLabel("This booking is " + d.status + ". No further status changes are possible.");
@@ -323,7 +390,16 @@ public class BookingDetailDialog extends JDialog {
         } else {
             for (String target : next) {
                 boolean cancel = BookingStatus.CANCELLED.equals(target);
-                JButton b = button(cancel ? "Cancel booking" : "Mark as " + target, cancel);
+                // Confirming with a driver already set is the highlighted "Confirm booking" above.
+                if (BookingStatus.CONFIRMED.equals(target) && BookingActions.hasDriver(d.driverUsername)) continue;
+                String text = cancel ? "Cancel booking"
+                        : BookingStatus.CONFIRMED.equals(target) ? "Confirm without a driver"
+                        : "Mark as " + target;
+                // Plain (white) buttons: the one highlighted action of this booking is in the Next step box above.
+                JButton b = cancel ? button(text, true) : UiKit.secondaryButton(text);
+                if (BookingStatus.CONFIRMED.equals(target)) {
+                    b.setToolTipText("Confirm now and assign the driver later");
+                }
                 b.addActionListener(e -> confirmAndChange(target));
                 row.add(b);
             }
@@ -341,7 +417,47 @@ public class BookingDetailDialog extends JDialog {
         return p;
     }
 
+    /**
+     * Runs a receipt action only after re-reading the booking from the database and finding its driver
+     * still saved there, so a receipt is never made for a booking whose assignment did not succeed (or was
+     * removed meanwhile).
+     */
+    private void withSavedDriver(java.util.function.Consumer<BookingService.Detail> action) {
+        if (busy) return;
+        busy = true;
+        new SwingWorker<BookingService.Detail, Void>() {
+            @Override
+            protected BookingService.Detail doInBackground() throws Exception {
+                return BookingService.loadDetail(bookingId);
+            }
+
+            @Override
+            protected void done() {
+                busy = false;
+                BookingService.Detail fresh;
+                try {
+                    fresh = get();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(BookingDetailDialog.this,
+                            "Could not check the booking before printing: " + rootMessage(ex),
+                            "Receipt", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                if (fresh == null || !BookingActions.canPrint(fresh.driverUsername)) {
+                    JOptionPane.showMessageDialog(BookingDetailDialog.this,
+                            fresh == null ? "This booking no longer exists."
+                                    : BookingActions.whyNoReceipt(fresh.status, fresh.driverUsername),
+                            "Receipt", JOptionPane.INFORMATION_MESSAGE);
+                    load();
+                    return;
+                }
+                action.accept(fresh);
+            }
+        }.execute();
+    }
+
     private void saveReceipt(BookingService.Detail d) {
+        if (!BookingActions.canPrint(d.driverUsername)) return;   // only reached through withSavedDriver
         try {
             ExportDirectories.initialize();
             JFileChooser chooser = new JFileChooser(ExportDirectories.receiptsDirectory().toFile());
@@ -363,6 +479,7 @@ public class BookingDetailDialog extends JDialog {
     }
 
     private void printReceipt(BookingService.Detail d) {
+        if (!BookingActions.canPrint(d.driverUsername)) return;   // only reached through withSavedDriver
         File pdf = null;
         try {
             pdf = File.createTempFile("Receipt_" + d.bookingId + "_", ".pdf");
@@ -534,7 +651,12 @@ public class BookingDetailDialog extends JDialog {
     // ASSIGNING A DRIVER
     // =====================================================
 
-    private void chooseAndAssignDriver() {
+    /**
+     * Picks a driver and saves it. With {@code confirm} (a Pending booking) the same click also confirms
+     * the booking, in one transaction. Choosing the driver in this window is the confirmation; changing an
+     * existing driver says so on its button.
+     */
+    private void chooseAndAssignDriver(boolean confirm) {
         if (busy) return;
         final BookingService.Detail d = detail;
         busy = true;
@@ -561,41 +683,47 @@ public class BookingDetailDialog extends JDialog {
                 options.removeIf(o -> o.username.equals(d.driverUsername));
                 if (options.isEmpty()) {
                     JOptionPane.showMessageDialog(BookingDetailDialog.this,
-                            "No other active driver has an Available vehicle right now.",
+                            (d.driverUsername == null ? "No" : "No other") + " active driver has an Available vehicle right now."
+                                    + (confirm ? "\nYou can confirm the booking without a driver and assign one later." : ""),
                             "Assign driver", JOptionPane.INFORMATION_MESSAGE);
                     return;
                 }
+                boolean change = d.driverUsername != null;
                 JComboBox<BookingService.DriverOption> combo =
                         new JComboBox<>(options.toArray(new BookingService.DriverOption[0]));
-                int ok = JOptionPane.showConfirmDialog(BookingDetailDialog.this,
-                        new Object[]{"Driver for booking #" + d.bookingId
-                                + (d.driverUsername == null ? "" : " (currently " + d.driverUsername + ")") + ":", combo},
-                        d.driverUsername == null ? "Assign driver" : "Change driver",
-                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-                if (ok == JOptionPane.OK_OPTION) {
-                    BookingService.DriverOption chosen = (BookingService.DriverOption) combo.getSelectedItem();
-                    if (chosen != null && Boolean.FALSE.equals(chosen.mobileLinked)
-                            && JOptionPane.showConfirmDialog(BookingDetailDialog.this,
-                            chosen.username + " has no mobile app sign-in, so this delivery will not appear on a phone.\n"
-                                    + "Link a sign-in under Accounts if they use the app. Assign anyway?",
-                            "Assign driver", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
-                        return;
-                    }
-                    runAssign(d, chosen);
+                String title = confirm ? "Confirm & assign driver" : change ? "Change driver" : "Assign driver";
+                String okText = confirm ? "Confirm & assign" : change ? "Change driver" : "Assign driver";
+                String intro = confirm
+                        ? "Confirm booking #" + d.bookingId + " for " + orDash(d.clientName) + " and assign this driver:"
+                        : change ? "Booking #" + d.bookingId + " is assigned to " + d.driverUsername + ". Change it to:"
+                        : "Driver for booking #" + d.bookingId + ":";
+                Object[] buttons = {okText, "Cancel"};
+                int ok = JOptionPane.showOptionDialog(BookingDetailDialog.this, new Object[]{intro, combo}, title,
+                        JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, buttons, buttons[0]);
+                if (ok != 0) return;
+                BookingService.DriverOption chosen = (BookingService.DriverOption) combo.getSelectedItem();
+                if (chosen != null && Boolean.FALSE.equals(chosen.mobileLinked)
+                        && JOptionPane.showConfirmDialog(BookingDetailDialog.this,
+                        chosen.username + " has no mobile app sign-in, so this delivery will not appear on a phone.\n"
+                                + "Link a sign-in under Accounts if they use the app. Assign anyway?",
+                        title, JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
+                    return;
                 }
+                runAssign(d, chosen, confirm);
             }
         }.execute();
     }
 
-    private void runAssign(BookingService.Detail d, BookingService.DriverOption choice) {
+    private void runAssign(BookingService.Detail d, BookingService.DriverOption choice, boolean confirm) {
         if (busy || choice == null) return;
         busy = true;
-        showMessage("Updating booking...", false);
+        showMessage(confirm ? "Confirming and assigning..." : "Updating booking...", false);
         final String status = d.status, previous = d.driverUsername;
         new SwingWorker<Boolean, Void>() {
             @Override
             protected Boolean doInBackground() throws Exception {
-                return BookingService.assignDriver(d.bookingId, status, previous, choice);
+                return confirm ? BookingService.confirmAndAssignDriver(d.bookingId, previous, choice)
+                               : BookingService.assignDriver(d.bookingId, status, previous, choice);
             }
 
             @Override
@@ -603,7 +731,8 @@ public class BookingDetailDialog extends JDialog {
                 busy = false;
                 try {
                     boolean audited = get();
-                    notice = "Driver set to " + choice.username + " (vehicle " + choice.vehicleId + ")."
+                    notice = (confirm ? "Booking confirmed and driver set to " : "Driver set to ")
+                            + choice.username + " (vehicle " + choice.vehicleId + "). You can print the receipt now."
                             + (audited ? "" : " (Not recorded in the audit log: the audit table does not exist yet.)");
                     if (onChanged != null) onChanged.run();
                 } catch (Exception ex) {
@@ -619,11 +748,12 @@ public class BookingDetailDialog extends JDialog {
                     JOptionPane.showMessageDialog(BookingDetailDialog.this,
                             cause instanceof BookingService.ConflictException || cause instanceof IllegalStateException
                                     ? cause.getMessage()
-                                    : "The driver was NOT changed: " + cause.getMessage(),
-                            "Driver not changed", JOptionPane.ERROR_MESSAGE);
+                                    : (confirm ? "The booking was NOT confirmed and no driver was assigned: "
+                                               : "The driver was NOT changed: ") + cause.getMessage(),
+                            confirm ? "Not confirmed" : "Driver not changed", JOptionPane.ERROR_MESSAGE);
                     if (onChanged != null) onChanged.run();
                 }
-                load();
+                load();   // always show what the database really contains now (Print appears only if it saved)
             }
         }.execute();
     }
