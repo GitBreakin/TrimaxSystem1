@@ -24,12 +24,13 @@ import javax.swing.table.DefaultTableModel;
 
 /**
  * Inventory: products with puhunan (capital cost), patong (markup) and the selling price, stock,
- * restocking with its purchase cost, stock corrections with a reason, the full stock history, and
- * (Stage F) the product picture agents see in the mobile app.
+ * restocking with its purchase cost, stock corrections with a reason, bad orders (broken, damaged,
+ * expired... items taken out of stock as a loss), the full stock history, and (Stage F) the product
+ * picture agents see in the mobile app.
  *
  * Selling price = puhunan + patong (a peso amount or a percent of the puhunan); the database keeps
  * it that way. Editing a product never changes its stock: stock only moves through Restock, Correct
- * stock, bookings and sales, and every move is in the Stock history tab.
+ * stock, Bad order, bookings and sales, and every move is in the Stock history tab.
  */
 public class InventoryPanel extends JPanel {
 
@@ -90,12 +91,18 @@ public class InventoryPanel extends JPanel {
     private final JProgressBar imageProgress = new JProgressBar();
     private final JButton btnChooseImage = UiKit.secondaryButton("Choose picture...");
     private final JButton btnRemoveImage = UiKit.secondaryButton("Remove picture");
-    private JButton btnAdd, btnUpdate, btnDelete, btnClear, btnRestock, btnAdjust;
+    private JButton btnAdd, btnUpdate, btnDelete, btnClear, btnRestock, btnAdjust, btnBadOrder;
+    /** The server has bad orders (20261028_04). */
+    private boolean badOrdersSupported;
 
     /** Height the product list keeps when the window is short (about six rows); the page scrolls then. */
     private static final int MIN_TABLE_HEIGHT = 360;
 
     private final StockHistoryPanel historyPanel = new StockHistoryPanel();
+    private final BadOrdersPanel badOrdersPanel = new BadOrdersPanel(() -> {
+        loadInventory();
+        historyPanel.reloadIfShown();
+    });
     private final JTabbedPane tabs = new JTabbedPane();
 
     public InventoryPanel() {
@@ -189,8 +196,10 @@ public class InventoryPanel extends JPanel {
 
         tabs.addTab("Products", UiKit.pageScroll(productsTab, Theme.BACKGROUND));
         tabs.addTab("Stock history", historyPanel);
+        tabs.addTab("Bad orders", badOrdersPanel);
         tabs.addChangeListener(e -> {
             if (tabs.getSelectedComponent() == historyPanel) historyPanel.reloadProducts(products.values());
+            if (tabs.getSelectedComponent() == badOrdersPanel) badOrdersPanel.showing();
         });
         add(tabs, BorderLayout.CENTER);
 
@@ -347,8 +356,11 @@ public class InventoryPanel extends JPanel {
         btnDelete = UiKit.dangerButton("Delete product");
         btnRestock = UiKit.secondaryButton("Restock...");
         btnAdjust = UiKit.secondaryButton("Correct stock...");
+        btnBadOrder = UiKit.secondaryButton("Bad order...");
         btnRestock.setToolTipText("Record newly bought stock: quantity and cost per unit (a purchase, not a sale)");
-        btnAdjust.setToolTipText("Fix the stock count with a reason (damaged, expired, count difference)");
+        btnAdjust.setToolTipText("Fix the stock count with a reason (count difference, lost, returned by customer)");
+        btnBadOrder.setToolTipText("Broken, damaged, expired, defective or spoiled items: take them out of stock "
+                + "and count their puhunan as a loss");
         btnClear.addActionListener(e -> clearFields());
         btnAdd.addActionListener(e -> saveProduct(true));
         btnUpdate.addActionListener(e -> saveProduct(false));
@@ -357,6 +369,7 @@ public class InventoryPanel extends JPanel {
         });
         btnRestock.addActionListener(e -> openRestock());
         btnAdjust.addActionListener(e -> openAdjust());
+        btnBadOrder.addActionListener(e -> openBadOrder());
 
         JPanel actions = new JPanel(new BorderLayout());
         actions.setOpaque(false);
@@ -364,6 +377,7 @@ public class InventoryPanel extends JPanel {
         stockActions.setOpaque(false);
         stockActions.add(btnRestock);
         stockActions.add(btnAdjust);
+        stockActions.add(btnBadOrder);
         JPanel productActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         productActions.setOpaque(false);
         productActions.add(btnClear);
@@ -436,6 +450,7 @@ public class InventoryPanel extends JPanel {
         btnClear.setEnabled(idle);
         btnRestock.setEnabled(idle && selected && pricingSupported);
         btnAdjust.setEnabled(idle && selected && pricingSupported);
+        btnBadOrder.setEnabled(idle && selected && pricingSupported);
         updatePricing();
     }
 
@@ -877,6 +892,7 @@ public class InventoryPanel extends JPanel {
     private void refreshInventory() {
         loadInventory();
         historyPanel.reloadIfShown();
+        badOrdersPanel.reloadIfShown();
     }
 
     /**
@@ -1008,6 +1024,7 @@ public class InventoryPanel extends JPanel {
             InventoryService.Catalog catalog = InventoryService.list(keyword);
             picturesSupported = catalog.pictures;
             pricingSupported = catalog.pricing && Db.salesReady();
+            badOrdersSupported = pricingSupported && Db.badOrdersReady();
             itemDiscountsSupported = catalog.itemDiscounts;
             loadSuppliers();
             loadInsights();
@@ -1140,9 +1157,30 @@ public class InventoryPanel extends JPanel {
     private void openAdjust() {
         InventoryService.Product p = selectedProductId == null ? null : products.get(selectedProductId);
         if (p == null) return;
-        if (StockDialogs.adjust(SwingUtilities.getWindowAncestor(this), p)) {
+        if (StockDialogs.adjust(SwingUtilities.getWindowAncestor(this), p, badOrdersSupported)) {
             loadInventory();
             historyPanel.reloadIfShown();
+        }
+    }
+
+    private void openBadOrder() {
+        InventoryService.Product p = selectedProductId == null ? null : products.get(selectedProductId);
+        if (p == null) return;
+        if (!badOrdersSupported && !Db.badOrdersReady()) {
+            JOptionPane.showMessageDialog(this, Db.notReadyMessage("Bad orders", Db.missingBadOrdersUpdate()),
+                    "Bad order", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        badOrdersSupported = true;
+        if (p.stock <= 0) {
+            JOptionPane.showMessageDialog(this, p.name + " has no stock, so there is nothing to take out.",
+                    "Bad order", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (StockDialogs.badOrder(SwingUtilities.getWindowAncestor(this), p, null)) {
+            loadInventory();
+            historyPanel.reloadIfShown();
+            badOrdersPanel.reloadIfShown();
         }
     }
 

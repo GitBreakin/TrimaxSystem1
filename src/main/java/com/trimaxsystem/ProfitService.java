@@ -16,15 +16,18 @@ import java.util.Map;
 
 /**
  * Sales and profit from the database (trimax_private.profit_summary / profit_trend, sql/20261027_01
- * part 9 and sql/20261027_02), so the Dashboard, Sales & Profit and the exports all use the same rules:
+ * part 9, sql/20261027_02 and sql/20261028_04), so the Dashboard, Sales & Profit and the exports all use
+ * the same rules:
  *   Net sales      = sales - discounts   (completed bookings by completion date + paid Walk-In / In-House sales)
  *   Gross profit   = net sales - cost of goods sold (the puhunan recorded on each sold line)
- *   Net profit     = gross profit - payroll - other expenses
+ *   Net profit     = gross profit - payroll - other expenses - bad orders
  *   Payroll        = pay periods ending in the range, paid and unpaid
  *   Other expenses = expenses dated in the range, paid and unpaid, not voided (20261027_02)
+ *   Bad orders     = puhunan of broken / damaged / expired... items found in the range, not undone (20261028_04)
  * Days are Asia/Manila days; a range [from, to] includes both dates.
- * On a server without 20261027_02 the expense columns are missing: they read as 0 and
- * {@link Summary#expensesTracked} is false, and net profit is the server's (gross profit - payroll).
+ * On a server without 20261027_02 / 20261028_04 those columns are missing: they read as 0,
+ * {@link Summary#expensesTracked} / {@link Summary#badOrdersTracked} is false, and net profit is the
+ * server's (without them).
  */
 final class ProfitService {
 
@@ -41,6 +44,11 @@ final class ProfitService {
         BigDecimal otherExpensesPaid = BigDecimal.ZERO, otherExpensesUnpaid = BigDecimal.ZERO;
         /** False when the server does not have 20261027_02 yet (no other expenses in net profit). */
         boolean expensesTracked;
+        /** Puhunan of the bad orders found in the range (20261028_04); 0 when not tracked. */
+        BigDecimal badOrdersLoss = BigDecimal.ZERO;
+        int badOrdersCount, badOrdersNoCost;
+        /** False when the server does not have 20261028_04 yet (no bad orders in net profit). */
+        boolean badOrdersTracked;
 
         BigDecimal otherExpenses() {
             return otherExpensesPaid.add(otherExpensesUnpaid);
@@ -62,7 +70,7 @@ final class ProfitService {
 
         boolean empty() {
             return bookingsCount == 0 && salesCount == 0 && unpaidCount == 0 && payrollCount == 0 && restockCount == 0
-                    && otherExpensesCount == 0;
+                    && otherExpensesCount == 0 && badOrdersCount == 0;
         }
     }
 
@@ -117,6 +125,12 @@ final class ProfitService {
                     s.otherExpensesUnpaid = rs.getBigDecimal("other_expenses_unpaid");
                     s.otherExpensesCount = rs.getInt("other_expenses_count");
                 }
+                s.badOrdersTracked = hasColumn(rs.getMetaData(), "bad_orders_loss");
+                if (s.badOrdersTracked) {
+                    s.badOrdersLoss = rs.getBigDecimal("bad_orders_loss");
+                    s.badOrdersCount = rs.getInt("bad_orders_count");
+                    s.badOrdersNoCost = rs.getInt("bad_orders_no_cost");
+                }
                 return s;
             }
         }
@@ -150,6 +164,7 @@ final class ProfitService {
         LocalDate bucket;
         BigDecimal revenue, cogs, grossProfit, payroll, netProfit;
         BigDecimal otherExpenses = BigDecimal.ZERO;
+        BigDecimal badOrders = BigDecimal.ZERO;
     }
 
     /** True when the result has that column (case-insensitive; PostgreSQL returns lower case). */
@@ -175,6 +190,7 @@ final class ProfitService {
             ps.setString(3, monthly(from, to) ? "month" : "day");
             try (ResultSet rs = ps.executeQuery()) {
                 boolean withExpenses = hasColumn(rs.getMetaData(), "other_expenses");
+                boolean withBadOrders = hasColumn(rs.getMetaData(), "bad_orders");
                 while (rs.next()) {
                     Point p = new Point();
                     p.bucket = rs.getDate("bucket_start").toLocalDate();
@@ -184,6 +200,7 @@ final class ProfitService {
                     p.payroll = rs.getBigDecimal("payroll");
                     p.netProfit = rs.getBigDecimal("net_profit");
                     if (withExpenses) p.otherExpenses = rs.getBigDecimal("other_expenses");
+                    if (withBadOrders) p.badOrders = rs.getBigDecimal("bad_orders");
                     out.add(p);
                 }
             }

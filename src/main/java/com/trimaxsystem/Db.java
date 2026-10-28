@@ -8,17 +8,19 @@ import java.util.UUID;
 
 /**
  * Small database helpers shared by the sales, stock, payroll and profit screens.
- * The business rules live in the database functions of sql/20261027_01_sales_inventory_payroll.sql
- * and sql/20261027_02_expenses.sql;
+ * The business rules live in the database functions of sql/20261027_01_sales_inventory_payroll.sql,
+ * sql/20261027_02_expenses.sql and sql/20261028_04_bad_orders.sql;
  * these helpers only check that they are there, label stock changes and turn errors into plain text.
  */
 final class Db {
 
     static final String UPDATE_27 = "database update 20261027_01_sales_inventory_payroll";
     static final String UPDATE_27_EXPENSES = "database update 20261027_02_expenses";
+    static final String UPDATE_28_BAD_ORDERS = "database update 20261028_04_bad_orders";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
+    private static volatile boolean badOrdersReady;
 
     private Db() {
     }
@@ -75,6 +77,29 @@ final class Db {
     static String missingExpensesUpdate() {
         if (!salesReady()) return UPDATE_27;
         return expensesReady() ? "" : UPDATE_27_EXPENSES;
+    }
+
+    /** True when the server has the bad-order table and functions (20261028_04), on top of 20261027_01. */
+    static boolean badOrdersReady() {
+        if (badOrdersReady) return true;
+        if (!salesReady()) return false;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.record_bad_order(text,integer,integer,text,text,date,text,uuid)') is not null "
+                             + "and to_regprocedure('trimax_private.void_bad_order(text,bigint,text)') is not null "
+                             + "and to_regclass('public.bad_orders') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            badOrdersReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return badOrdersReady;
+    }
+
+    /** The update the bad-order screens still need ("" when the server has it). */
+    static String missingBadOrdersUpdate() {
+        if (!salesReady()) return UPDATE_27;
+        return badOrdersReady() ? "" : UPDATE_28_BAD_ORDERS;
     }
 
     /** A new id for one save, so a double click or a retry is saved only once. */

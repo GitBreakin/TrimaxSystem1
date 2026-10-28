@@ -38,6 +38,11 @@ create table if not exists public.suppliers (
 create unique index if not exists suppliers_name_key on public.suppliers (name_key);
 alter table public.suppliers enable row level security;
 revoke all on table public.suppliers from public, anon, authenticated, service_role;
+do $$
+begin
+    execute 'revoke all on sequence ' || pg_get_serial_sequence('public.suppliers', 'supplier_id')
+            || ' from public, anon, authenticated, service_role';
+end $$;
 comment on table public.suppliers is 'Supplier names the Admin picks from in Inventory (Desktop only).';
 
 insert into public.suppliers (name)

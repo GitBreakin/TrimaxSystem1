@@ -97,7 +97,8 @@ final class ProfitWidgets {
                         }
                         status.setForeground(Theme.MUTED);
                         status.setText("Net sales = completed bookings + paid Walk-In / In-House sales, after discounts. "
-                                + "Net profit = gross profit − payroll − other expenses.");
+                                + "Net profit = " + (m.isEmpty() ? "gross profit − payroll − other expenses − bad orders"
+                                        : ProfitPanel.netProfitFormula(m.values().iterator().next())) + ".");
                     } catch (Exception ex) {
                         Throwable c = ex.getCause() != null ? ex.getCause() : ex;
                         for (JLabel[] l : cells.values()) {
@@ -217,7 +218,7 @@ final class ProfitWidgets {
                 g.drawString(s, x, h - 10);
             }
             // legend
-            String lineLabel = "Net profit (after payroll and expenses)";
+            String lineLabel = "Net profit (after payroll, expenses and bad orders)";
             int lx = Math.max(left, w - right - 124 - g.getFontMetrics().stringWidth(lineLabel));
             g.setColor(new Color(0x93C5FD));
             g.fillRect(lx, 8, 12, 10);
