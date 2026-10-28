@@ -207,7 +207,7 @@ public class BookForClientPanel extends JPanel {
                         rs.getString("product_name"),
                         rs.getString("supplier"),
                         rs.getDouble("price"),   // Double so it renders as 11 instead of 11.0
-                        rs.getInt("stock"),
+                        rs.getBigDecimal("stock").intValue(),   // whole cases here (a half is not counted)
                         ""                       // Amount (editable)
                 });
             }

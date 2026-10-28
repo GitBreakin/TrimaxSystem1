@@ -172,7 +172,10 @@ public class BookingService {
 
     /** One product line of a booking. */
     public static class Line {
+        /** The product name; " (half case)" is added for a half case line. */
         public String product;
+        /** A half case line (sql/20261028_07): the price is the half case's and it took 0.5 off the stock each. */
+        public boolean half;
         public int quantity;
         public BigDecimal unitPrice;
         public BigDecimal subtotal;
@@ -276,9 +279,11 @@ public class BookingService {
                 + "LEFT JOIN users u    ON u.username = b.driver_username "
                 + "LEFT JOIN vehicles v ON v.vehicle_id = b.vehicle_id "
                 + "WHERE b.booking_id = ?";
-        // discount_per_unit read through to_jsonb so this also works on a server without 20261027_04
+        // discount_per_unit and unit read through to_jsonb so this also works on a server without
+        // 20261027_04 / 20261028_07
         String lines = "SELECT p.product_name, bi.quantity, bi.unit_price, bi.subtotal, "
-                + "coalesce((to_jsonb(bi) ->> 'discount_per_unit')::numeric, 0) "
+                + "coalesce((to_jsonb(bi) ->> 'discount_per_unit')::numeric, 0), "
+                + "coalesce(to_jsonb(bi) ->> 'unit', 'WHOLE') = 'HALF' "
                 + "FROM booking_items bi LEFT JOIN products p ON p.product_id = bi.product_id "
                 + "WHERE bi.booking_id = ? ORDER BY bi.item_id";
 
@@ -312,6 +317,8 @@ public class BookingService {
                         l.unitPrice = rs.getBigDecimal(3);
                         l.subtotal = rs.getBigDecimal(4);
                         l.discountPerUnit = rs.getBigDecimal(5);
+                        l.half = rs.getBoolean(6);
+                        if (l.half) l.product = (l.product == null ? "(deleted product)" : l.product) + " (half case)";
                         d.items.add(l);
                     }
                 }
@@ -447,9 +454,10 @@ public class BookingService {
                 if (BookingStatus.CANCELLED.equals(newStatus)) {
                     Db.stockContext(conn, "BOOKING_CANCELLED", "booking", String.valueOf(bookingId));
                     try (PreparedStatement ps = conn.prepareStatement(
+                            // stock_qty: a half case gives back 0.5 (20261028_07); before it, the quantity
                             "UPDATE products p SET stock = p.stock + s.qty FROM ("
-                                    + "SELECT product_id, SUM(quantity) AS qty FROM booking_items "
-                                    + "WHERE booking_id = ? GROUP BY product_id) s "
+                                    + "SELECT i.product_id, SUM(coalesce((to_jsonb(i) ->> 'stock_qty')::numeric, i.quantity)) AS qty "
+                                    + "FROM booking_items i WHERE i.booking_id = ? GROUP BY i.product_id) s "
                                     + "WHERE p.product_id = s.product_id")) {
                         ps.setInt(1, bookingId);
                         ps.executeUpdate();

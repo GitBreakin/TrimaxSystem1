@@ -217,17 +217,17 @@ final class StockHistoryPanel extends JPanel {
                     Theme.formatWhen(m.at),
                     m.productName + (m.productId == null ? " (deleted)" : ""),
                     InventoryService.kindLabel(m.kind),
-                    (m.change > 0 ? "+" : "") + m.change,
-                    m.before + " → " + m.after,
+                    (m.change.signum() > 0 ? "+" : "") + Money.qty(m.change),
+                    Money.qty(m.before) + " → " + Money.qty(m.after),
                     m.unitCost == null ? "" : Money.plain(m.unitCost),
                     ("RESTOCK".equals(m.kind) || "BAD_ORDER".equals(m.kind)) && m.totalCost != null ? Money.plain(m.totalCost) : "",
                     InventoryService.referenceText(m),
                     m.actor == null ? "" : m.actor,
                     m.note == null ? "" : m.note});
         }
-        summary.setText("In: " + h.unitsIn + " units   ·   Out: " + h.unitsOut + " units   ·   Restocked: "
-                + h.restockUnits + " units for " + Money.peso(h.restockCost) + " (stock purchases, not sales)"
-                + (h.badOrderUnits == 0 ? "" : "   ·   Bad orders: " + h.badOrderUnits + " units, "
+        summary.setText("In: " + Money.qty(h.unitsIn) + " units   ·   Out: " + Money.qty(h.unitsOut) + " units   ·   Restocked: "
+                + Money.qty(h.restockUnits) + " units for " + Money.peso(h.restockCost) + " (stock purchases, not sales)"
+                + (h.badOrderUnits.signum() == 0 ? "" : "   ·   Bad orders: " + Money.qty(h.badOrderUnits) + " units, "
                         + Money.peso(h.badOrderCost) + " puhunan")
                 + (h.truncated ? "   ·   showing the latest " + LIMIT + " changes" : ""));
         cards.show(center, "table");

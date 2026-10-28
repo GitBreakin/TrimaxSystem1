@@ -67,6 +67,38 @@ final class Money {
         return (int) v;
     }
 
+    /**
+     * A stock or case count as people write it: "10", "9.5", "0" (stock can end in .5 since half cases,
+     * sql/20261028_07). Empty for null.
+     */
+    static String qty(BigDecimal v) {
+        if (v == null) return "";
+        if (v.signum() == 0) return "0";
+        return v.stripTrailingZeros().toPlainString();
+    }
+
+    /**
+     * A stock change in whole or half cases: "3", "0.5", "1.5" (no sign; see the caller for + / -).
+     * Throws with a message naming the field unless it is more than 0, at most max, and a multiple of 0.5.
+     */
+    static BigDecimal parseHalves(String text, String label, int max) {
+        String t = text == null ? "" : text.trim().replace(",", "");
+        if (t.isEmpty()) throw new IllegalArgumentException("Enter the " + label + ".");
+        BigDecimal v;
+        try {
+            v = new BigDecimal(t.startsWith("+") ? t.substring(1) : t);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("The " + label + " must be a number, for example 2 or 1.5.");
+        }
+        if (v.signum() <= 0 || v.compareTo(BigDecimal.valueOf(max)) > 0) {
+            throw new IllegalArgumentException("The " + label + " must be more than 0 and at most " + String.format("%,d", max) + ".");
+        }
+        if (v.multiply(BigDecimal.valueOf(2)).stripTrailingZeros().scale() > 0) {
+            throw new IllegalArgumentException("The " + label + " must be whole or half cases (for example 2 or 1.5).");
+        }
+        return new BigDecimal(v.stripTrailingZeros().toPlainString());
+    }
+
     /** Selling price = puhunan + patong (a peso amount, or a percent of the puhunan), to the centavo. */
     static BigDecimal sellingPrice(BigDecimal cost, String markupType, BigDecimal markupValue) {
         if (cost == null || markupType == null || markupValue == null) return null;

@@ -32,7 +32,8 @@ public final class InsightService {
     public static final class Item {
         public int productId;
         public String name, supplier;
-        public int stock;
+        /** Cases in stock (can end in .5 since half cases, 20261028_07). */
+        public BigDecimal stock = BigDecimal.ZERO;
         public BigDecimal price, unitsSold, revenue, prevUnits, prevRevenue, trendPct, historyDays, observedDays,
                 avgDaily, coverageDays;
         public int orders;
@@ -163,7 +164,7 @@ public final class InsightService {
                     i.productId = rs.getInt("product_id");
                     i.name = rs.getString("product_name");
                     i.supplier = rs.getString("supplier");
-                    i.stock = rs.getInt("stock");
+                    i.stock = InventoryService.qtyOf(rs.getBigDecimal("stock"));
                     i.price = rs.getBigDecimal("price");
                     i.unitsSold = rs.getBigDecimal("units_sold");
                     i.revenue = rs.getBigDecimal("revenue");

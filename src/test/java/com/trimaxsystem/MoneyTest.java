@@ -59,4 +59,19 @@ class MoneyTest {
         assertEquals(d("8200.00"), PayrollService.net(d("8000.00"), d("500.00"), d("300.00")));
         assertEquals(d("600.00"), PayrollService.net(d("600.00"), null, null));
     }
+
+    @Test
+    void stockCountsWithHalves() {
+        assertEquals("10", Money.qty(d("10.0")));
+        assertEquals("9.5", Money.qty(d("9.50")));
+        assertEquals("0", Money.qty(d("0.0")));
+        assertEquals("1000", Money.qty(d("1E+3")));
+        assertEquals("", Money.qty(null));
+        assertEquals(d("1.5"), Money.parseHalves("1.5", "quantity", 100));
+        assertEquals(d("0.5"), Money.parseHalves("+0.50", "quantity", 100));
+        assertEquals(d("3"), Money.parseHalves("3.0", "quantity", 100));
+        for (String bad : new String[]{"0", "0.3", "1.25", "-1", "abc", "", "101"}) {
+            assertThrows(IllegalArgumentException.class, () -> Money.parseHalves(bad, "quantity", 100), bad);
+        }
+    }
 }

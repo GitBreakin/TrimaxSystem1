@@ -127,4 +127,13 @@ class BadOrderTest {
         s.badOrdersCount = 1;
         assertFalse(s.empty(), "a period with only a bad order is not empty");
     }
+
+    @Test
+    void stockWithAHalfCase() {
+        assertNull(BadOrderService.check(2, new BigDecimal("2.5"), "BROKEN", "", TODAY, TODAY, null));
+        assertNotNull(BadOrderService.check(3, new BigDecimal("2.5"), "BROKEN", "", TODAY, TODAY, null), "3 > 2.5");
+        assertTrue(BadOrderService.check(3, new BigDecimal("2.5"), "BROKEN", "", TODAY, TODAY, null).contains("Only 2.5"));
+        assertTrue(BadOrderService.preview(new BigDecimal("2.5"), 2, new BigDecimal("20"), null).startsWith("Stock 2.5 → 0.5"));
+        assertTrue(BadOrderService.preview(new BigDecimal("10"), 2, new BigDecimal("20"), null).startsWith("Stock 10 → 8"));
+    }
 }

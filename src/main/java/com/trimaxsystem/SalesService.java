@@ -46,16 +46,22 @@ final class SalesService {
     // ------------------------------------------------------------------------------------ choices
 
     static final class ProductOption {
-        int id, stock;
+        int id;
+        /** Cases in stock (can end in .5 since half cases, 20261028_07). */
+        BigDecimal stock = BigDecimal.ZERO;
         String name, supplier;
         BigDecimal price, cost;
+        /** Price of a half case; null = whole cases only (or a server without 20261028_07). */
+        BigDecimal halfPrice;
     }
 
     static List<ProductOption> products() throws Db.Failure {
         List<ProductOption> out = new ArrayList<>();
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "select product_id, product_name, supplier, price, capital_cost, stock from products "
+                     // half_price read through to_jsonb so this also works on a server without 20261028_07
+                     "select product_id, product_name, supplier, price, capital_cost, stock, "
+                             + "(to_jsonb(p) ->> 'half_price')::numeric from products p "
                              + "order by lower(product_name), product_id");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
@@ -65,7 +71,8 @@ final class SalesService {
                 p.supplier = rs.getString(3);
                 p.price = rs.getBigDecimal(4);
                 p.cost = rs.getBigDecimal(5);
-                p.stock = rs.getInt(6);
+                p.stock = InventoryService.qtyOf(rs.getBigDecimal(6));
+                p.halfPrice = rs.getBigDecimal(7);
                 out.add(p);
             }
         } catch (SQLException e) {

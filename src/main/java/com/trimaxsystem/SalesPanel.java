@@ -33,7 +33,7 @@ public class SalesPanel extends JPanel {
 
     // ---- new sale
     private final JTextField productSearch = new JTextField(18);
-    private final DefaultTableModel productModel = new DefaultTableModel(new String[]{"Product", "Price", "Stock"}, 0) {
+    private final DefaultTableModel productModel = new DefaultTableModel(new String[]{"Product", "Price", "Half case", "Stock"}, 0) {
         @Override
         public boolean isCellEditable(int r, int c) {
             return false;
@@ -43,6 +43,7 @@ public class SalesPanel extends JPanel {
     private final List<SalesService.ProductOption> allProducts = new ArrayList<>();
     private final List<SalesService.ProductOption> shownProducts = new ArrayList<>();
     private final JLabel productState = new JLabel(" ");
+    private final JButton addHalf = UiKit.secondaryButton("Add half case");
 
     private final JRadioButton walkIn = new JRadioButton("Walk-In", true);
     private final JRadioButton inHouse = new JRadioButton("In-House");
@@ -149,32 +150,43 @@ public class SalesPanel extends JPanel {
                 BorderLayout.NORTH);
         UiKit.searchField(productSearch, "Search products");
         productSearch.getDocument().addDocumentListener(StockDialogs.listener(this::filterProducts));
-        productSearch.addActionListener(e -> addSelectedProduct());
+        productSearch.addActionListener(e -> addSelectedProduct(false));
         head.add(productSearch, BorderLayout.SOUTH);
         card.add(head, BorderLayout.NORTH);
 
         UiKit.styleTable(productTable, 34);
         productTable.setDefaultRenderer(Object.class, new UiKit.CellRenderer(SwingConstants.LEFT, false, false));
         productTable.getColumnModel().getColumn(1).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, false, false));
-        productTable.getColumnModel().getColumn(2).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, false, true));
-        productTable.getColumnModel().getColumn(0).setPreferredWidth(240);
-        UiKit.alignHeaders(productTable, 1, 2);
+        productTable.getColumnModel().getColumn(2).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, false, false));
+        productTable.getColumnModel().getColumn(3).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, false, true));
+        productTable.getColumnModel().getColumn(0).setPreferredWidth(230);
+        productTable.getColumnModel().getColumn(2).setPreferredWidth(95);
+        productTable.getTableHeader().setToolTipText("Half case: the price of half a case (blank = whole cases only)");
+        UiKit.alignHeaders(productTable, 1, 2, 3);
         productTable.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) addSelectedProduct();
+                if (e.getClickCount() == 2) addSelectedProduct(false);
             }
         });
+        productTable.getSelectionModel().addListSelectionListener(e -> updateHalfButton());
         card.add(UiKit.tableScroll(productTable), BorderLayout.CENTER);
 
         JButton add = UiKit.primaryButton("Add to sale");
-        add.addActionListener(e -> addSelectedProduct());
+        add.addActionListener(e -> addSelectedProduct(false));
+        addHalf.setToolTipText("Add half a case at the product's half case price (0.5 comes off the stock)");
+        addHalf.addActionListener(e -> addSelectedProduct(true));
+        addHalf.setEnabled(false);
         JPanel south = new JPanel(new BorderLayout(8, 0));
         south.setOpaque(false);
         productState.setFont(Theme.SMALL);
         productState.setForeground(Theme.MUTED);
         south.add(productState, BorderLayout.CENTER);
-        south.add(add, BorderLayout.EAST);
+        JPanel addButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        addButtons.setOpaque(false);
+        addButtons.add(addHalf);
+        addButtons.add(add);
+        south.add(addButtons, BorderLayout.EAST);
         card.add(south, BorderLayout.SOUTH);
         return card;
     }
@@ -221,7 +233,7 @@ public class SalesPanel extends JPanel {
         cartTable.setDefaultRenderer(Object.class, new UiKit.CellRenderer(SwingConstants.RIGHT, false, false));
         cartTable.getColumnModel().getColumn(0).setCellRenderer(new UiKit.CellRenderer(SwingConstants.LEFT, false, false));
         cartTable.getColumnModel().getColumn(5).setCellRenderer(new UiKit.CellRenderer(SwingConstants.RIGHT, true, false));
-        int[] cw = {220, 80, 50, 90, 90, 100};
+        int[] cw = {250, 75, 45, 85, 80, 95};
         for (int i = 0; i < cw.length; i++) cartTable.getColumnModel().getColumn(i).setPreferredWidth(cw[i]);
         cartTable.getColumnModel().getColumn(4).setMinWidth(80);
         UiKit.alignHeaders(cartTable, 1, 2, 3, 4, 5);
@@ -417,35 +429,53 @@ public class SalesPanel extends JPanel {
             String hay = (p.name + " " + (p.supplier == null ? "" : p.supplier) + " " + p.id).toLowerCase();
             if (!q.isEmpty() && !hay.contains(q)) continue;
             shownProducts.add(p);
-            productModel.addRow(new Object[]{p.name, Money.plain(p.price), p.stock == 0 ? "Out" : String.valueOf(p.stock)});
+            productModel.addRow(new Object[]{p.name, Money.plain(p.price), p.halfPrice == null ? "" : Money.plain(p.halfPrice),
+                    p.stock.signum() <= 0 ? "Out" : Money.qty(p.stock)});
         }
+        updateHalfButton();
         productState.setForeground(Theme.MUTED);
         productState.setText(shownProducts.size() + " of " + allProducts.size() + " products");
         if (shownProducts.size() == 1) productTable.setRowSelectionInterval(0, 0);
     }
 
-    private void addSelectedProduct() {
+    /** The product picked in the list (or the only one shown), or null. */
+    private SalesService.ProductOption selectedProduct() {
         int r = productTable.getSelectedRow();
         if (r < 0) {
             if (shownProducts.size() == 1) r = 0;
-            else return;
+            else return null;
         }
-        SalesService.ProductOption p = shownProducts.get(productTable.convertRowIndexToModel(r));
-        if (p.stock <= 0) {
-            JOptionPane.showMessageDialog(this, p.name + " is out of stock.", "Out of stock", JOptionPane.WARNING_MESSAGE);
+        return shownProducts.get(productTable.convertRowIndexToModel(r));
+    }
+
+    private void updateHalfButton() {
+        SalesService.ProductOption p = selectedProduct();
+        addHalf.setEnabled(p != null && p.halfPrice != null);
+        addHalf.setToolTipText(p != null && p.halfPrice == null
+                ? p.name + " is sold by the whole case only (set a half case price in Inventory)"
+                : "Add half a case at the product's half case price (0.5 comes off the stock)");
+    }
+
+    /** half: add a half case (needs the product's half case price). */
+    private void addSelectedProduct(boolean half) {
+        SalesService.ProductOption p = selectedProduct();
+        if (p == null) return;
+        if (half && p.halfPrice == null) {
+            JOptionPane.showMessageDialog(this, p.name + " is sold by the whole case only. Set its half case price in "
+                    + "Inventory to sell half cases.", "Half case", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        for (SaleCart.Line l : cart.lines()) {
-            if (l.productId == p.id && l.quantity >= p.stock) {
-                JOptionPane.showMessageDialog(this, "Only " + p.stock + " of " + p.name + " in stock.", "Stock",
-                        JOptionPane.WARNING_MESSAGE);
-                return;
-            }
+        String problem = cart.addProblem(p.id, p.name, p.stock, half);
+        if (problem != null) {
+            JOptionPane.showMessageDialog(this, problem, p.stock.signum() <= 0 ? "Out of stock" : "Stock",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
         }
-        cart.add(p.id, p.name, p.price, p.cost, p.stock);
+        cart.add(p.id, p.name, half ? p.halfPrice : p.price, p.cost, p.stock, half);
         cartChanged();
         for (int i = 0; i < cart.lines().size(); i++) {
-            if (cart.lines().get(i).productId == p.id) cartTable.setRowSelectionInterval(i, i);
+            SaleCart.Line l = cart.lines().get(i);
+            if (l.productId == p.id && l.half == half) cartTable.setRowSelectionInterval(i, i);
         }
     }
 
@@ -454,9 +484,9 @@ public class SalesPanel extends JPanel {
         if (r < 0) return;
         SaleCart.Line l = cart.lines().get(r);
         int q = l.quantity + delta;
-        if (q > l.stock) {
-            JOptionPane.showMessageDialog(this, "Only " + l.stock + " of " + l.name + " in stock.", "Stock",
-                    JOptionPane.WARNING_MESSAGE);
+        String problem = delta > 0 ? cart.quantityProblem(r, q) : null;
+        if (problem != null) {
+            JOptionPane.showMessageDialog(this, problem, "Stock", JOptionPane.WARNING_MESSAGE);
             return;
         }
         cart.setQuantity(r, q);
@@ -619,7 +649,7 @@ public class SalesPanel extends JPanel {
         public Object getValueAt(int r, int c) {
             SaleCart.Line l = cart.lines().get(r);
             switch (c) {
-                case 0: return l.name;
+                case 0: return l.cartName();
                 case 1: return Money.plain(l.price);
                 case 2: return String.valueOf(l.quantity);
                 case 3: return Money.plain(l.subtotal());
@@ -635,7 +665,8 @@ public class SalesPanel extends JPanel {
             try {
                 if (c == 2) {
                     int q = Money.parseInt(String.valueOf(value), "quantity", 0, 100_000);
-                    if (q > l.stock) throw new IllegalArgumentException("Only " + l.stock + " of " + l.name + " in stock.");
+                    String problem = q > l.quantity ? cart.quantityProblem(r, q) : null;
+                    if (problem != null) throw new IllegalArgumentException(problem);
                     cart.setQuantity(r, q);
                 } else if (c == 4) {
                     BigDecimal d = Money.parse(String.valueOf(value), "discount", true);

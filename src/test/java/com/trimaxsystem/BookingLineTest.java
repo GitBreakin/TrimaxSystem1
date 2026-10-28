@@ -20,4 +20,15 @@ class BookingLineTest {
         assertEquals(0, new BigDecimal("4.00").compareTo(l.lineDiscount()));
         assertEquals(0, new BigDecimal("46.00").compareTo(l.lineTotal()));
     }
+
+    @Test
+    void halfCaseLine() {
+        BookingService.Line l = new BookingService.Line();
+        l.half = true;
+        l.quantity = 3;
+        l.unitPrice = new BigDecimal("125.00");
+        l.subtotal = new BigDecimal("375.00");
+        l.discountPerUnit = new BigDecimal("5.00");
+        assertEquals(0, new BigDecimal("360.00").compareTo(l.lineTotal()), "the discount is per half case");
+    }
 }

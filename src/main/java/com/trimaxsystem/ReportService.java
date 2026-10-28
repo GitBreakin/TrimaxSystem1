@@ -113,10 +113,11 @@ public final class ReportService {
     public static final class ProductRow {
         public int productId;
         public String name;
-        public long quantity;
+        /** Cases ordered; a half case counts 0.5 (20261028_07). */
+        public BigDecimal quantity = BigDecimal.ZERO;
         public int bookings;
         public BigDecimal value = BigDecimal.ZERO;
-        public Integer stockNow;
+        public BigDecimal stockNow;
     }
 
     public static final class Report {
@@ -282,11 +283,11 @@ public final class ReportService {
                     ProductRow p = new ProductRow();
                     p.productId = rs.getInt(1);
                     p.name = rs.getString(2);
-                    p.quantity = rs.getLong(3);
+                    p.quantity = InventoryService.qtyOf(rs.getBigDecimal(3));
                     p.bookings = rs.getInt(4);
                     p.value = rs.getBigDecimal(5);
-                    int stock = rs.getInt(6);
-                    p.stockNow = rs.wasNull() ? null : stock;
+                    BigDecimal stock = rs.getBigDecimal(6);
+                    p.stockNow = stock == null ? null : InventoryService.qtyOf(stock);
                     r.products.add(p);
                 }
             }
@@ -355,7 +356,9 @@ public final class ReportService {
                 + "FROM bookings b LEFT JOIN clients c ON c.client_id = b.client_id "
                 + "WHERE " + inRange + " GROUP BY b.client_id, c.client_name "
                 + "ORDER BY COUNT(*) DESC, 5 DESC, c.client_name LIMIT ?";
-        String perProduct = "SELECT p.product_id, p.product_name, COALESCE(SUM(i.quantity), 0), "
+        // stock_qty: a half case counts 0.5 (20261028_07); read through to_jsonb so older servers work too
+        String perProduct = "SELECT p.product_id, p.product_name, "
+                + "COALESCE(SUM(coalesce((to_jsonb(i) ->> 'stock_qty')::numeric, i.quantity)), 0), "
                 + "COUNT(DISTINCT b.booking_id), COALESCE(SUM(i.subtotal), 0), p.stock "
                 + "FROM booking_items i JOIN bookings b ON b.booking_id = i.booking_id "
                 + "JOIN products p ON p.product_id = i.product_id "
