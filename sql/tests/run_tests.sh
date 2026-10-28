@@ -279,4 +279,21 @@ check "select count(*) = $bo_rows and count(*) filter (where loss_source = 'CUST
 check "select (select loss_amount from trimax_private.record_bad_order('marc.admin', (select min(product_id) from products where stock > 0), 1, 'BROKEN', 'DISPOSED', null, null, gen_random_uuid())) is not distinct from (select round(capital_cost, 2) from products where product_id = (select min(product_id) from products where stock > 0))" "after rollback a bad order is pieces x puhunan again"
 psql_owner -f 20261028_06_bad_order_custom_loss.sql
 check "select to_regprocedure('trimax_private.record_bad_order(text,integer,integer,text,text,date,text,uuid,numeric)') is not null and (select count(*) = 2 from pg_proc where proname = 'record_bad_order')" "loss set by hand re-applies after rollback"
+echo "== Half case: rollback while nothing is half yet, then apply (twice: re-runnable)"
+# Production has one line per product in a booking (booking_items_booking_id_product_id_key); the
+# reconstructed test schema does not, so it is added here to test against what production has.
+psql_owner -c "alter table booking_items drop constraint if exists booking_items_booking_id_product_id_key" -c "alter table booking_items add constraint booking_items_booking_id_product_id_key unique (booking_id, product_id)" >/dev/null
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261028_07_half_case.sql
+psql_owner -f 20261028_97_rollback_half_case.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and (select data_type = 'integer' from information_schema.columns where table_name = 'products' and column_name = 'stock') and (select pg_get_constraintdef(oid) = 'UNIQUE (booking_id, product_id)' from pg_constraint where conname = 'booking_items_booking_id_product_id_key') and to_regclass('public.booking_items_booking_product_unit_key') is null" "rollback before any half case puts back every function exactly, whole-number stock and one line per product"
+psql_owner -f 20261028_07_half_case.sql
+psql_owner -f 20261028_07_half_case.sql
+psql_su -d "$DB" -f tests/54_half_case_tests.sql > "/tmp/$DB.54.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL HALF CASE/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.54.log"
+grep -q '^ALL HALF CASE SQL TESTS PASSED' "/tmp/$DB.54.log" || { echo "FAIL half case tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.54.log"
+echo "== Half case: rollback after half cases were sold is refused and changes nothing"
+if psql_owner -f 20261028_97_rollback_half_case.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although half cases exist"; exit 1; fi
+check "select (select data_type = 'numeric' from information_schema.columns where table_name = 'products' and column_name = 'stock') and to_regprocedure('trimax_private.set_product_half_price(text,integer,numeric)') is not null and exists (select 1 from booking_items where unit = 'HALF')" "refused rollback left the half cases, the stock and the functions as they were"
 echo "ALL DATABASE TESTS PASSED"

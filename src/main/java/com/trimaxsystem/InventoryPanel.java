@@ -61,7 +61,11 @@ public class InventoryPanel extends JPanel {
     private final JTextField txtPrice = new JTextField(8);
     private final JTextField txtMinMarkup = new JTextField(8);
     private final JCheckBox chkAgentDiscount = new JCheckBox("Agents may discount this item");
+    /** Price of a half case (sql/20261028_07). Blank = sold by the whole case only. */
+    private final JTextField txtHalfPrice = new JTextField(8);
+    private JPanel halfPriceGroup;
     private boolean itemDiscountsSupported;
+    private boolean halfCaseSupported;
     private final JTextField txtStock = new JTextField(8);
     private final JLabel lblStockCaption = UiKit.caption("Starting stock");
     private final JLabel lblPricing = new JLabel(" ");
@@ -243,7 +247,7 @@ public class InventoryPanel extends JPanel {
     // ---------- FORM ----------
 
     private JPanel buildProductCard() {
-        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock, txtHalfPrice}) {
             UiKit.styleField(f);
         }
         cmbSupplier.setFont(Theme.SUBTLE);
@@ -253,6 +257,9 @@ public class InventoryPanel extends JPanel {
         UiKit.placeholder(txtCost, "e.g. 45.00");
         UiKit.placeholder(txtMarkup, "e.g. 12");
         UiKit.placeholder(txtMinMarkup, "0.00");
+        UiKit.placeholder(txtHalfPrice, "blank = whole case only");
+        txtHalfPrice.setToolTipText("Price of half a case. Agents and Walk-In can then sell a half case "
+                + "(0.5 comes off the stock). Leave blank if this item is sold by the whole case only.");
         cmbMarkupType.setFont(Theme.SUBTLE);
         txtCost.setToolTipText("Puhunan: what one unit costs you (capital cost)");
         txtMarkup.setToolTipText("Patong: what you add on top of the puhunan, in pesos or as a percent of the puhunan");
@@ -271,7 +278,7 @@ public class InventoryPanel extends JPanel {
             public void changedUpdate(DocumentEvent e) { updatePricing(); }
         };
         // Not on the price field: the price is what this writes (a listener may not change its own field).
-        for (JTextField f : new JTextField[]{txtCost, txtMarkup, txtMinMarkup}) f.getDocument().addDocumentListener(recalc);
+        for (JTextField f : new JTextField[]{txtCost, txtMarkup, txtMinMarkup, txtHalfPrice}) f.getDocument().addDocumentListener(recalc);
         cmbMarkupType.addActionListener(e -> updatePricing());
         // A product that only had a price gets its patong filled in when its puhunan is first typed.
         txtCost.addFocusListener(new java.awt.event.FocusAdapter() {
@@ -331,7 +338,10 @@ public class InventoryPanel extends JPanel {
         stockGroup.add(txtStock, BorderLayout.CENTER);
         fields.add(stockGroup, g);
         g.gridx = 1;
-        g.gridwidth = 3;
+        halfPriceGroup = UiKit.group("Half case price (₱)", txtHalfPrice);
+        fields.add(halfPriceGroup, g);
+        g.gridx = 2;
+        g.gridwidth = 2;
         lblPricing.setFont(Theme.SMALL);
         lblPricing.setForeground(Theme.MUTED);
         fields.add(lblPricing, g);
@@ -400,7 +410,8 @@ public class InventoryPanel extends JPanel {
         txtMarkup.setText(p.markupValue == null ? "" : p.markupValue.stripTrailingZeros().toPlainString());
         txtPrice.setText(p.price == null ? "" : p.price.toPlainString());
         txtMinMarkup.setText(p.minMarkup == null || p.minMarkup.signum() == 0 ? "" : p.minMarkup.toPlainString());
-        txtStock.setText(String.valueOf(p.stock));
+        txtStock.setText(Money.qty(p.stock));
+        txtHalfPrice.setText(p.halfPrice == null ? "" : p.halfPrice.toPlainString());
         chkAgentDiscount.setSelected(Boolean.TRUE.equals(p.agentDiscount));
         updateFormMode();
     }
@@ -432,6 +443,8 @@ public class InventoryPanel extends JPanel {
         txtMarkup.setEnabled(pricingSupported && hasCost);
         txtMinMarkup.setEnabled(pricingSupported);
         chkAgentDiscount.setVisible(itemDiscountsSupported);
+        if (halfPriceGroup != null) halfPriceGroup.setVisible(halfCaseSupported && pricingSupported);
+        txtHalfPrice.setEnabled(halfCaseSupported && pricingSupported && !saving);
         chkAgentDiscount.setEnabled(itemDiscountsSupported && pricingSupported && !saving);
         txtPrice.setEditable(!pricingSupported || !hasCost);
         if (pricingSupported) {
@@ -470,7 +483,8 @@ public class InventoryPanel extends JPanel {
             if (cost == null) {
                 lblPricing.setText(html("No puhunan: the price is typed in. Profit cannot be worked out and agents "
                         + "cannot give discounts on this product until a puhunan is set."
-                        + (itemDiscountsSupported && chkAgentDiscount.isSelected() ? " (\"Agents may discount\" waits for the puhunan.)" : "")));
+                        + (itemDiscountsSupported && chkAgentDiscount.isSelected() ? " (\"Agents may discount\" waits for the puhunan.)" : "")
+                        + halfCaseText(null, null)));
                 lblPricing.setForeground(Theme.MUTED);
                 return;
             }
@@ -491,12 +505,35 @@ public class InventoryPanel extends JPanel {
                        : chkAgentDiscount.isSelected()
                        ? ". Agents may take up to " + Money.peso(price.subtract(floor).max(BigDecimal.ZERO))
                          + " off each piece (down to " + Money.peso(floor) + ")."
-                       : ". Agents cannot discount this item (tick \"Agents may discount\" to allow it).")));
+                       : ". Agents cannot discount this item (tick \"Agents may discount\" to allow it).")
+                    + halfCaseText(cost, min)));
             lblPricing.setForeground(Theme.TEXT);
         } catch (IllegalArgumentException ex) {
             lblPricing.setText(html(ex.getMessage()));
             lblPricing.setForeground(Theme.DANGER);
         }
+    }
+
+    /**
+     * The half case part of the pricing line: its puhunan (half the case's) and what agents may take off
+     * (the same rule as the database: half the minimum patong). Empty when there is no half case price.
+     */
+    private String halfCaseText(BigDecimal cost, BigDecimal min) {
+        if (!halfCaseSupported) return "";
+        BigDecimal half = Money.parse(txtHalfPrice.getText(), "half case price", true);
+        if (half == null) return " Sold by the whole case only.";
+        if (half.signum() == 0) throw new IllegalArgumentException("The half case price must be more than 0, or blank.");
+        if (cost == null) return " Half case: " + Money.peso(half) + ".";
+        BigDecimal halfCost = cost.multiply(new BigDecimal("0.5")).setScale(2, java.math.RoundingMode.HALF_UP);
+        if (half.compareTo(halfCost) < 0) {
+            return " Half case: " + Money.peso(half) + " is below its puhunan " + Money.peso(halfCost) + " (a loss on every half case).";
+        }
+        BigDecimal halfFloor = halfCost.add(min == null ? BigDecimal.ZERO
+                : min.multiply(new BigDecimal("0.5")).setScale(2, java.math.RoundingMode.HALF_UP));
+        return " Half case: " + Money.peso(half) + " (puhunan " + Money.peso(halfCost) + ", patong "
+                + Money.peso(half.subtract(halfCost)) + ")"
+                + (itemDiscountsSupported && chkAgentDiscount.isSelected()
+                   ? ", agents may take up to " + Money.peso(half.subtract(halfFloor).max(BigDecimal.ZERO)) + " off." : ".");
     }
 
     /** A field that shows a value but cannot be typed in looks greyed, so nobody tries. */
@@ -857,17 +894,17 @@ public class InventoryPanel extends JPanel {
         return card;
     }
 
-    private static String getStatus(int stock) {
-        if (stock > 99) return "High";
-        else if (stock > 59) return "Moderate";
-        else if (stock > 29) return "Low";
-        else if (stock == 0) return "Out";
+    static String getStatus(BigDecimal stock) {
+        if (stock == null || stock.signum() <= 0) return "Out";
+        if (stock.compareTo(BigDecimal.valueOf(99)) > 0) return "High";
+        else if (stock.compareTo(BigDecimal.valueOf(59)) > 0) return "Moderate";
+        else if (stock.compareTo(BigDecimal.valueOf(29)) > 0) return "Low";
         else return "Critical";
     }
 
     /** Blanks the form and deselects the table row. */
     private void clearFields() {
-        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock, txtHalfPrice}) {
             f.setText("");
         }
         if (cmbSupplier.getItemCount() > 0) cmbSupplier.setSelectedIndex(0);
@@ -1026,6 +1063,7 @@ public class InventoryPanel extends JPanel {
             pricingSupported = catalog.pricing && Db.salesReady();
             badOrdersSupported = pricingSupported && Db.badOrdersReady();
             itemDiscountsSupported = catalog.itemDiscounts;
+            halfCaseSupported = catalog.halfCase;
             loadSuppliers();
             loadInsights();
             String supplierFilter = (String) cmbSupplierFilter.getSelectedItem();
@@ -1050,7 +1088,7 @@ public class InventoryPanel extends JPanel {
                         p.cost == null ? "—" : Money.plain(p.cost),
                         p.markupText(),
                         Money.plain(p.price),
-                        String.valueOf(p.stock),
+                        Money.qty(p.stock),
                         status,
                         insight == null ? "" : InsightRules.labels(insight.flags)
                 });
@@ -1097,7 +1135,7 @@ public class InventoryPanel extends JPanel {
             if (id != null) savePicture(id, add);
             return;
         }
-        final BigDecimal cost, markupValue, minMarkup, price;
+        final BigDecimal cost, markupValue, minMarkup, price, halfPrice;
         final Integer startingStock;
         try {
             cost = Money.parse(txtCost.getText(), "puhunan", true);
@@ -1106,6 +1144,11 @@ public class InventoryPanel extends JPanel {
             minMarkup = Money.parse(txtMinMarkup.getText(), "minimum patong", true);
             startingStock = add ? Money.parseInt(txtStock.getText().isBlank() ? "0" : txtStock.getText(),
                     "starting stock", 0, 1_000_000) : null;
+            halfPrice = halfCaseSupported ? Money.parse(txtHalfPrice.getText(), "half case price", true) : null;
+            if (halfPrice != null && halfPrice.signum() == 0) {
+                throw new IllegalArgumentException("The half case price must be more than 0. Leave it blank if this "
+                        + "item is sold by the whole case only.");
+            }
         } catch (IllegalArgumentException ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "Check the product", JOptionPane.WARNING_MESSAGE);
             return;
@@ -1118,14 +1161,30 @@ public class InventoryPanel extends JPanel {
         final Integer id = add ? null : Integer.valueOf(selectedProductId);
         final String type = markupType();
         final Boolean agentDiscount = itemDiscountsSupported ? chkAgentDiscount.isSelected() : null;
+        InventoryService.Product before = id == null ? null : products.get(selectedProductId);
+        final boolean halfChanged = halfCaseSupported
+                && (before == null ? halfPrice != null
+                    : before.halfPrice == null ? halfPrice != null
+                    : halfPrice == null || before.halfPrice.compareTo(halfPrice) != 0);
         saving = true;
         updateFormMode();
         new SwingWorker<Integer, Void>() {
             @Override
             protected Integer doInBackground() throws Exception {
-                return InventoryService.save(id, name, supplier, cost, type, markupValue, minMarkup, price, startingStock,
-                        agentDiscount);
+                int savedId = InventoryService.save(id, name, supplier, cost, type, markupValue, minMarkup, price,
+                        startingStock, agentDiscount);
+                if (halfChanged) {
+                    try {
+                        InventoryService.setHalfPrice(savedId, halfPrice);
+                    } catch (Db.Failure f) {
+                        halfProblem = f.getMessage();
+                    }
+                }
+                return savedId;
             }
+
+            /** The product was saved but its half case price was not (shown after reloading). */
+            private String halfProblem;
 
             @Override
             protected void done() {
@@ -1135,6 +1194,10 @@ public class InventoryPanel extends JPanel {
                     selectedProductId = String.valueOf(savedId);
                     loadInventory();
                     savePicture(savedId, add);
+                    if (halfProblem != null) {
+                        JOptionPane.showMessageDialog(InventoryPanel.this, "The product was saved, but not its half case "
+                                + "price:\n" + halfProblem, "Half case price not saved", JOptionPane.WARNING_MESSAGE);
+                    }
                 } catch (Exception ex) {
                     Throwable c = ex.getCause() != null ? ex.getCause() : ex;
                     updateFormMode();
@@ -1172,7 +1235,7 @@ public class InventoryPanel extends JPanel {
             return;
         }
         badOrdersSupported = true;
-        if (p.stock <= 0) {
+        if (p.stock.signum() <= 0) {
             JOptionPane.showMessageDialog(this, p.name + " has no stock, so there is nothing to take out.",
                     "Bad order", JOptionPane.INFORMATION_MESSAGE);
             return;

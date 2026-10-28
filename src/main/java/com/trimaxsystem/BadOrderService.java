@@ -68,6 +68,12 @@ final class BadOrderService {
      */
     static String check(Integer quantity, int stock, String reason, String note, LocalDate found, LocalDate today,
                         BigDecimal customLoss) {
+        return check(quantity, BigDecimal.valueOf(stock), reason, note, found, today, customLoss);
+    }
+
+    /** As above; the stock can end in .5 since half cases (20261028_07), the pieces are whole. */
+    static String check(Integer quantity, BigDecimal stock, String reason, String note, LocalDate found, LocalDate today,
+                        BigDecimal customLoss) {
         if (customLoss != null) {
             if (customLoss.signum() <= 0 || customLoss.compareTo(MAX_CUSTOM_LOSS) > 0
                     || customLoss.stripTrailingZeros().scale() > 2) {
@@ -77,7 +83,9 @@ final class BadOrderService {
         } else if (quantity == null || quantity < 1) {
             return "Enter how many pieces are bad (1 or more).";
         }
-        if (quantity > stock) return "Only " + stock + " in stock: a bad order cannot take out more than that.";
+        if (BigDecimal.valueOf(quantity).compareTo(stock) > 0) {
+            return "Only " + Money.qty(stock) + " in stock: a bad order cannot take out more than that.";
+        }
         if (reason == null) return "Choose the reason.";
         String n = note == null ? "" : note.trim();
         if ("OTHER".equals(reason) && n.length() < 3) return "Describe the reason in the note.";
@@ -90,7 +98,12 @@ final class BadOrderService {
 
     /** "Stock 50 → 45 · Loss ₱100.00 (5 × ₱20.00 puhunan)" for the dialog; customLoss = the amount set by hand. */
     static String preview(int stock, int quantity, BigDecimal unitCost, BigDecimal customLoss) {
-        String s = quantity == 0 ? "Stock stays " + stock : "Stock " + stock + " → " + (stock - quantity);
+        return preview(BigDecimal.valueOf(stock), quantity, unitCost, customLoss);
+    }
+
+    static String preview(BigDecimal stock, int quantity, BigDecimal unitCost, BigDecimal customLoss) {
+        String s = quantity == 0 ? "Stock stays " + Money.qty(stock)
+                : "Stock " + Money.qty(stock) + " → " + Money.qty(stock.subtract(BigDecimal.valueOf(quantity)));
         if (customLoss != null) return s + "  ·  Loss " + Money.peso(customLoss) + " (set by hand)";
         BigDecimal loss = loss(quantity, unitCost);
         if (loss == null) return s + "  ·  no puhunan: the loss in pesos is not counted";
@@ -101,7 +114,7 @@ final class BadOrderService {
 
     static final class Result {
         long id;
-        int stockBefore, stockAfter;
+        BigDecimal stockBefore, stockAfter;
         BigDecimal loss;
         boolean alreadySaved;
     }
@@ -127,8 +140,8 @@ final class BadOrderService {
                 rs.next();
                 Result r = new Result();
                 r.id = rs.getLong("bad_order_id");
-                r.stockBefore = rs.getInt("stock_before");
-                r.stockAfter = rs.getInt("stock_after");
+                r.stockBefore = InventoryService.qtyOf(rs.getBigDecimal("stock_before"));
+                r.stockAfter = InventoryService.qtyOf(rs.getBigDecimal("stock_after"));
                 r.loss = rs.getBigDecimal("loss_amount");
                 r.alreadySaved = rs.getBoolean("already_existed");
                 return r;
@@ -140,7 +153,7 @@ final class BadOrderService {
     }
 
     /** Puts the pieces back in stock; the loss no longer counts. Returns {before, after}. */
-    static int[] undo(long badOrderId, String reason) throws Db.Failure {
+    static BigDecimal[] undo(long badOrderId, String reason) throws Db.Failure {
         String admin = Db.admin();
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -150,7 +163,7 @@ final class BadOrderService {
             ps.setString(3, reason);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
-                return new int[]{rs.getInt(1), rs.getInt(2)};
+                return new BigDecimal[]{InventoryService.qtyOf(rs.getBigDecimal(1)), InventoryService.qtyOf(rs.getBigDecimal(2))};
             }
         } catch (SQLException e) {
             throw Db.failure(e, "Could not undo the bad order", Db.UPDATE_28_BAD_ORDERS);

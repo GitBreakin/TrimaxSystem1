@@ -332,13 +332,13 @@ public class InsightsPanel extends JPanel {
             String suggested = i.has("RESTOCK") ? "Restock: order about " + i.recommendedQty
                     : i.has("CRITICAL") ? InsightRules.label("CRITICAL") + " - " + i.action("CRITICAL") : "";
             best.model.addRow(new Object[]{rank, i.productId, i.name, nz(i.supplier), InsightRules.qty(i.unitsSold),
-                    Money.plain(i.revenue), i.stock, InsightRules.trend(i.unitsSold, i.prevUnits, i.trendPct), suggested});
+                    Money.plain(i.revenue), Money.qty(i.stock), InsightRules.trend(i.unitsSold, i.prevUnits, i.trendPct), suggested});
         }
 
         List<InsightService.Item> s1 = filter(items, slow.include);
         slow.reset(s1);
         for (InsightService.Item i : s1) {
-            slow.model.addRow(new Object[]{i.productId, i.name, i.stock, InsightRules.qty(i.unitsSold), lastSale(i),
+            slow.model.addRow(new Object[]{i.productId, i.name, Money.qty(i.stock), InsightRules.qty(i.unitsSold), lastSale(i),
                     i.daysSinceLastSale == null ? "-" : i.daysSinceLastSale, InsightRules.perDay(i.avgDaily),
                     i.reason("SLOW"), i.action("SLOW")});
         }
@@ -346,7 +346,7 @@ public class InsightsPanel extends JPanel {
         List<InsightService.Item> s2 = filter(items, non.include);
         non.reset(s2);
         for (InsightService.Item i : s2) {
-            non.model.addRow(new Object[]{i.productId, i.name, i.stock,
+            non.model.addRow(new Object[]{i.productId, i.name, Money.qty(i.stock),
                     "last " + current.settings.nonMovingDays + " days", i.neverSold ? "Never sold" : lastSale(i),
                     i.daysSinceLastSale == null ? "-" : i.daysSinceLastSale, i.reason("NON_MOVING"), i.action("NON_MOVING")});
         }
@@ -354,7 +354,7 @@ public class InsightsPanel extends JPanel {
         List<InsightService.Item> s3 = filter(items, over.include);
         over.reset(s3);
         for (InsightService.Item i : s3) {
-            over.model.addRow(new Object[]{i.productId, i.name, i.stock, InsightRules.qty(i.unitsSold),
+            over.model.addRow(new Object[]{i.productId, i.name, Money.qty(i.stock), InsightRules.qty(i.unitsSold),
                     InsightRules.perDay(i.avgDaily), InsightRules.coverage(i.coverageDays), i.reason("OVERSTOCK"), i.action("OVERSTOCK")});
         }
 
@@ -363,20 +363,20 @@ public class InsightsPanel extends JPanel {
             BigDecimal cx = x.coverageDays == null ? BigDecimal.valueOf(Long.MAX_VALUE) : x.coverageDays;
             BigDecimal cy = y.coverageDays == null ? BigDecimal.valueOf(Long.MAX_VALUE) : y.coverageDays;
             int c = cx.compareTo(cy);
-            return c != 0 ? c : Integer.compare(x.stock, y.stock);
+            return c != 0 ? c : x.stock.compareTo(y.stock);
         });
         restock.reset(s4);
         for (InsightService.Item i : s4) {
             String why = i.has("RESTOCK") ? i.reason("RESTOCK") : i.reason("CRITICAL");
             String act = i.has("RESTOCK") ? i.action("RESTOCK") : i.action("CRITICAL")
                     + (i.avgDaily == null || i.avgDaily.signum() == 0 ? " No sales rate yet, so no quantity is suggested." : "");
-            restock.model.addRow(new Object[]{i.productId, i.name, i.stock, InsightRules.perDay(i.avgDaily),
+            restock.model.addRow(new Object[]{i.productId, i.name, Money.qty(i.stock), InsightRules.perDay(i.avgDaily),
                     InsightRules.coverage(i.coverageDays), i.recommendedQty == null ? "-" : i.recommendedQty, why, act});
         }
 
         all.reset(items);
         for (InsightService.Item i : items) {
-            all.model.addRow(new Object[]{i.productId, i.name, nz(i.supplier), i.stock, InsightRules.qty(i.unitsSold),
+            all.model.addRow(new Object[]{i.productId, i.name, nz(i.supplier), Money.qty(i.stock), InsightRules.qty(i.unitsSold),
                     InsightRules.perDay(i.avgDaily), InsightRules.coverage(i.coverageDays), InsightRules.labels(i.flags),
                     i.allReasons().replace('\n', ' ')});
         }

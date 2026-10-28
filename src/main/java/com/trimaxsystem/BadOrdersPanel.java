@@ -418,18 +418,18 @@ final class BadOrdersPanel extends JPanel {
         final long id = r.id;
         final String reasonText = why.trim();
         btnUndo.setEnabled(false);
-        new SwingWorker<int[], Void>() {
+        new SwingWorker<java.math.BigDecimal[], Void>() {
             @Override
-            protected int[] doInBackground() throws Exception {
+            protected java.math.BigDecimal[] doInBackground() throws Exception {
                 return BadOrderService.undo(id, reasonText);
             }
 
             @Override
             protected void done() {
                 try {
-                    int[] s = get();
+                    java.math.BigDecimal[] s = get();
                     JOptionPane.showMessageDialog(BadOrdersPanel.this, r.productName + "\n"
-                            + (r.partOfOneItem() ? "Stock unchanged" : "Stock " + s[0] + " → " + s[1])
+                            + (r.partOfOneItem() ? "Stock unchanged" : "Stock " + Money.qty(s[0]) + " → " + Money.qty(s[1]))
                             + ". Bad order #" + id + " is undone.", "Bad order undone", JOptionPane.INFORMATION_MESSAGE);
                     load();
                     if (onStockChanged != null) onStockChanged.run();

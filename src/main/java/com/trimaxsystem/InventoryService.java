@@ -28,7 +28,10 @@ final class InventoryService {
         int id;
         String name, supplier, imagePath, markupType;
         BigDecimal price, cost, markupValue, minMarkup;
-        int stock;
+        /** Cases in stock; can end in .5 since half cases (20261028_07). */
+        BigDecimal stock = BigDecimal.ZERO;
+        /** Price of a half case; null = sold by the whole case only (or a server without 20261028_07). */
+        BigDecimal halfPrice;
         /** Agents may discount this item (20261027_04); null when the server does not have the setting. */
         Boolean agentDiscount;
 
@@ -45,6 +48,7 @@ final class InventoryService {
         boolean pricing;    // the products table has puhunan / patong (20261027_01)
         boolean pictures;   // the products table has image_path (20261025_06)
         boolean itemDiscounts;   // the products table has agent_discount_allowed (20261027_04)
+        boolean halfCase;        // the products table has half_price (20261028_07)
     }
 
     /** Products matching the keyword (id, name or supplier), by id. */
@@ -62,13 +66,14 @@ final class InventoryService {
                 c.pricing = has(rs, "capital_cost") && has(rs, "min_markup");
                 c.pictures = has(rs, "image_path");
                 c.itemDiscounts = has(rs, "agent_discount_allowed");
+                c.halfCase = has(rs, "half_price");
                 while (rs.next()) {
                     Product p = new Product();
                     p.id = rs.getInt("product_id");
                     p.name = rs.getString("product_name");
                     p.supplier = rs.getString("supplier");
                     p.price = rs.getBigDecimal("price");
-                    p.stock = rs.getInt("stock");
+                    p.stock = qtyOf(rs.getBigDecimal("stock"));
                     if (c.pictures) p.imagePath = rs.getString("image_path");
                     if (c.pricing) {
                         p.cost = rs.getBigDecimal("capital_cost");
@@ -77,11 +82,17 @@ final class InventoryService {
                         p.minMarkup = rs.getBigDecimal("min_markup");
                     }
                     if (c.itemDiscounts) p.agentDiscount = rs.getBoolean("agent_discount_allowed");
+                    if (c.halfCase) p.halfPrice = rs.getBigDecimal("half_price");
                     c.products.add(p);
                 }
             }
         }
         return c;
+    }
+
+    /** A count from the database without trailing zeros (10, 9.5); 0 for null. */
+    static BigDecimal qtyOf(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : new BigDecimal(v.stripTrailingZeros().toPlainString());
     }
 
     private static boolean has(ResultSet rs, String column) throws SQLException {
@@ -127,9 +138,26 @@ final class InventoryService {
         }
     }
 
+    /**
+     * Sets (or with null, turns off) the half case price (sql/20261028_07; the Admin is checked there).
+     * Changes nothing when it is the same.
+     */
+    static void setHalfPrice(int productId, BigDecimal halfPrice) throws Db.Failure {
+        String admin = Db.admin();
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("select trimax_private.set_product_half_price(?, ?, ?)")) {
+            ps.setString(1, admin);
+            ps.setInt(2, productId);
+            ps.setBigDecimal(3, halfPrice);
+            ps.executeQuery().close();
+        } catch (SQLException e) {
+            throw Db.failure(e, "Could not save the half case price", Db.UPDATE_28_HALF_CASE);
+        }
+    }
+
     static final class RestockResult {
         long movementId;
-        int stockBefore, stockAfter;
+        BigDecimal stockBefore, stockAfter;
         BigDecimal totalCost, price;
         boolean alreadySaved;
     }
@@ -152,8 +180,8 @@ final class InventoryService {
                 rs.next();
                 RestockResult r = new RestockResult();
                 r.movementId = rs.getLong("movement_id");
-                r.stockBefore = rs.getInt("stock_before");
-                r.stockAfter = rs.getInt("stock_after");
+                r.stockBefore = qtyOf(rs.getBigDecimal("stock_before"));
+                r.stockAfter = qtyOf(rs.getBigDecimal("stock_after"));
                 r.totalCost = rs.getBigDecimal("total_cost");
                 r.price = rs.getBigDecimal("price");
                 r.alreadySaved = rs.getBoolean("already_existed");
@@ -164,23 +192,28 @@ final class InventoryService {
         }
     }
 
-    /** Stock correction (+ or -) with a reason; never below 0. Returns {before, after}. */
-    static int[] adjust(int productId, int change, String reason, UUID requestId) throws Db.Failure {
+    /**
+     * Stock correction (+ or -) with a reason; never below 0. Whole or half cases (a half needs
+     * 20261028_07; a whole number is sent as before, so an older server keeps working). Returns {before, after}.
+     */
+    static BigDecimal[] adjust(int productId, BigDecimal change, String reason, UUID requestId) throws Db.Failure {
         String admin = Db.admin();
+        boolean whole = change.stripTrailingZeros().scale() <= 0;
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "select stock_before, stock_after from trimax_private.adjust_stock(?, ?, ?, ?, ?)")) {
             ps.setString(1, admin);
             ps.setInt(2, productId);
-            ps.setInt(3, change);
+            if (whole) ps.setInt(3, change.intValueExact());
+            else ps.setBigDecimal(3, change);
             ps.setString(4, reason);
             ps.setObject(5, requestId);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
-                return new int[]{rs.getInt(1), rs.getInt(2)};
+                return new BigDecimal[]{qtyOf(rs.getBigDecimal(1)), qtyOf(rs.getBigDecimal(2))};
             }
         } catch (SQLException e) {
-            throw Db.failure(e, "Could not correct the stock");
+            throw Db.failure(e, "Could not correct the stock", whole ? Db.UPDATE_27 : Db.UPDATE_28_HALF_CASE);
         }
     }
 
@@ -209,18 +242,18 @@ final class InventoryService {
         Timestamp at;
         Integer productId;
         String productName, kind, referenceType, referenceId, actor, note;
-        int change, before, after;
+        BigDecimal change = BigDecimal.ZERO, before = BigDecimal.ZERO, after = BigDecimal.ZERO;
         BigDecimal unitCost, totalCost;
     }
 
     static final class History {
         final List<Movement> rows = new ArrayList<>();
         boolean truncated;
-        int restockUnits;
+        BigDecimal restockUnits = BigDecimal.ZERO;
         BigDecimal restockCost = BigDecimal.ZERO;
-        int unitsIn, unitsOut;
+        BigDecimal unitsIn = BigDecimal.ZERO, unitsOut = BigDecimal.ZERO;
         /** Bad orders (BAD_ORDER) in the range: pieces out and their puhunan (undone ones come back as "in"). */
-        int badOrderUnits;
+        BigDecimal badOrderUnits = BigDecimal.ZERO;
         BigDecimal badOrderCost = BigDecimal.ZERO;
     }
 
@@ -258,11 +291,11 @@ final class InventoryService {
             ps.setInt(i, limit + 1);
             try (ResultSet rs = pt.executeQuery()) {
                 rs.next();
-                h.restockUnits = rs.getInt(1);
+                h.restockUnits = qtyOf(rs.getBigDecimal(1));
                 h.restockCost = rs.getBigDecimal(2);
-                h.unitsIn = rs.getInt(3);
-                h.unitsOut = rs.getInt(4);
-                h.badOrderUnits = rs.getInt(5);
+                h.unitsIn = qtyOf(rs.getBigDecimal(3));
+                h.unitsOut = qtyOf(rs.getBigDecimal(4));
+                h.badOrderUnits = qtyOf(rs.getBigDecimal(5));
                 h.badOrderCost = rs.getBigDecimal(6);
             }
             try (ResultSet rs = ps.executeQuery()) {
@@ -278,9 +311,9 @@ final class InventoryService {
                     m.productId = rs.wasNull() ? null : pid;
                     m.productName = rs.getString(4);
                     m.kind = rs.getString(5);
-                    m.change = rs.getInt(6);
-                    m.before = rs.getInt(7);
-                    m.after = rs.getInt(8);
+                    m.change = qtyOf(rs.getBigDecimal(6));
+                    m.before = qtyOf(rs.getBigDecimal(7));
+                    m.after = qtyOf(rs.getBigDecimal(8));
                     m.unitCost = rs.getBigDecimal(9);
                     m.totalCost = rs.getBigDecimal(10);
                     m.referenceType = rs.getString(11);

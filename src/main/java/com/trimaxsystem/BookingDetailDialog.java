@@ -275,6 +275,19 @@ public class BookingDetailDialog extends JDialog {
         DefaultTableCellRenderer right = new DefaultTableCellRenderer();
         right.setHorizontalAlignment(SwingConstants.RIGHT);
         for (int c = 1; c < cols.length; c++) t.getColumnModel().getColumn(c).setCellRenderer(right);
+        // The product gets the room: a half case line reads "... (half case)".
+        t.getColumnModel().getColumn(0).setPreferredWidth(300);
+        t.getColumnModel().getColumn(1).setPreferredWidth(50);
+        for (int c = 2; c < cols.length; c++) t.getColumnModel().getColumn(c).setPreferredWidth(110);
+        DefaultTableCellRenderer productCell = new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean sel, boolean focus, int row, int col) {
+                Component c = super.getTableCellRendererComponent(table, value, sel, focus, row, col);
+                setToolTipText(value == null ? null : String.valueOf(value));
+                return c;
+            }
+        };
+        t.getColumnModel().getColumn(0).setCellRenderer(productCell);
 
         JLabel heading = new JLabel("Items");
         heading.setFont(new Font("SansSerif", Font.BOLD, 15));

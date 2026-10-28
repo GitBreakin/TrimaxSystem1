@@ -78,7 +78,7 @@ final class StockDialogs {
         g.anchor = GridBagConstraints.WEST;
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = new Insets(0, 0, 10, 10);
-        JLabel now = new JLabel("<html>In stock now: <b>" + p.stock + "</b> &nbsp;·&nbsp; Puhunan now: <b>"
+        JLabel now = new JLabel("<html>In stock now: <b>" + Money.qty(p.stock) + "</b> &nbsp;·&nbsp; Puhunan now: <b>"
                 + (p.cost == null ? "none" : Money.peso(p.cost)) + "</b> &nbsp;·&nbsp; Selling price: <b>"
                 + Money.peso(p.price) + "</b></html>");
         now.setFont(Theme.SUBTLE);
@@ -135,7 +135,7 @@ final class StockDialogs {
                         InventoryService.RestockResult r = get();
                         saved[0] = true;
                         d.dispose();
-                        JOptionPane.showMessageDialog(owner, p.name + "\nStock " + r.stockBefore + " → " + r.stockAfter
+                        JOptionPane.showMessageDialog(owner, p.name + "\nStock " + Money.qty(r.stockBefore) + " → " + Money.qty(r.stockAfter)
                                         + ". Purchase of " + Money.peso(r.totalCost) + " recorded."
                                         + (use ? "\nPuhunan is now " + Money.peso(c) + "; selling price " + Money.peso(r.price) + "." : ""),
                                 "Restocked", JOptionPane.INFORMATION_MESSAGE);
@@ -152,6 +152,12 @@ final class StockDialogs {
 
         show(d, owner, form, save, cancel, "Record newly bought stock");
         return saved[0];
+    }
+
+    /** The quantity of a correction: whole cases, or with halves when the server has them. */
+    private static BigDecimal adjustQty(String text, boolean halves) {
+        return halves ? Money.parseHalves(text, "quantity", 1_000_000)
+                : BigDecimal.valueOf(Money.parseInt(text, "quantity", 1, 1_000_000));
     }
 
     private static final String[] REASONS = {"Count difference", "Damaged", "Expired", "Returned by customer", "Lost", "Other"};
@@ -176,6 +182,9 @@ final class StockDialogs {
             b.setFont(Theme.SUBTLE);
         }
         JTextField qty = new JTextField(8);
+        // Half cases (0.5, 1.5) only on a server that keeps stock in halves (20261028_07).
+        final boolean halves = Db.halfCaseReady();
+        if (halves) qty.setToolTipText("Whole or half cases, for example 2 or 1.5");
         JComboBox<String> reason = new JComboBox<>(REASONS);
         JTextField detail = new JTextField(24);
         JLabel result = new JLabel(" ");
@@ -200,11 +209,11 @@ final class StockDialogs {
             String why = (String) reason.getSelectedItem();
             boHint.setText(remove.isSelected() && ("Damaged".equals(why) || "Expired".equals(why)) ? boText : "");
             try {
-                int q = qty.getText().isBlank() ? 0 : Money.parseInt(qty.getText(), "quantity", 1, 1_000_000);
-                int after = p.stock + (add.isSelected() ? q : -q);
-                result.setText("Stock " + p.stock + " → " + after);
-                result.setForeground(after < 0 ? Theme.DANGER : Theme.TEXT);
-                if (after < 0) error.setText("Stock cannot go below 0.");
+                BigDecimal q = qty.getText().isBlank() ? BigDecimal.ZERO : adjustQty(qty.getText(), halves);
+                BigDecimal after = add.isSelected() ? p.stock.add(q) : p.stock.subtract(q);
+                result.setText("Stock " + Money.qty(p.stock) + " → " + Money.qty(after));
+                result.setForeground(after.signum() < 0 ? Theme.DANGER : Theme.TEXT);
+                if (after.signum() < 0) error.setText("Stock cannot go below 0.");
             } catch (IllegalArgumentException ex) {
                 result.setText(" ");
                 error.setText(ex.getMessage());
@@ -225,7 +234,7 @@ final class StockDialogs {
         g.anchor = GridBagConstraints.WEST;
         g.fill = GridBagConstraints.HORIZONTAL;
         g.insets = new Insets(0, 0, 10, 10);
-        JLabel now = new JLabel("<html>In stock now: <b>" + p.stock + "</b></html>");
+        JLabel now = new JLabel("<html>In stock now: <b>" + Money.qty(p.stock) + "</b></html>");
         now.setFont(Theme.SUBTLE);
         form.add(now, g);
         g.gridy++;
@@ -255,10 +264,10 @@ final class StockDialogs {
         JButton cancel = UiKit.secondaryButton("Cancel");
         cancel.addActionListener(e -> d.dispose());
         save.addActionListener(e -> {
-            final int change;
+            final BigDecimal change;
             try {
-                int q = Money.parseInt(qty.getText(), "quantity", 1, 1_000_000);
-                change = add.isSelected() ? q : -q;
+                BigDecimal q = adjustQty(qty.getText(), halves);
+                change = add.isSelected() ? q : q.negate();
             } catch (IllegalArgumentException ex) {
                 error.setText(ex.getMessage());
                 return;
@@ -273,19 +282,20 @@ final class StockDialogs {
             save.setEnabled(false);
             cancel.setEnabled(false);
             save.setText("Saving...");
-            new SwingWorker<int[], Void>() {
+            new SwingWorker<BigDecimal[], Void>() {
                 @Override
-                protected int[] doInBackground() throws Exception {
+                protected BigDecimal[] doInBackground() throws Exception {
                     return InventoryService.adjust(p.id, change, why, requestId);
                 }
 
                 @Override
                 protected void done() {
                     try {
-                        int[] r2 = get();
+                        BigDecimal[] r2 = get();
                         saved[0] = true;
                         d.dispose();
-                        JOptionPane.showMessageDialog(owner, p.name + "\nStock " + r2[0] + " → " + r2[1] + " (" + why + ").",
+                        JOptionPane.showMessageDialog(owner, p.name + "\nStock " + Money.qty(r2[0]) + " → "
+                                + Money.qty(r2[1]) + " (" + why + ").",
                                 "Stock corrected", JOptionPane.INFORMATION_MESSAGE);
                     } catch (Exception ex) {
                         Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
@@ -386,7 +396,7 @@ final class StockDialogs {
                 result.setText(" ");
                 return;
             }
-            now.setText("<html>In stock now: <b>" + cur.stock + "</b> &nbsp;·&nbsp; Puhunan: <b>"
+            now.setText("<html>In stock now: <b>" + Money.qty(cur.stock) + "</b> &nbsp;·&nbsp; Puhunan: <b>"
                     + (cur.cost == null ? "none" : Money.peso(cur.cost)) + "</b>"
                     + (cur.supplier == null || cur.supplier.isBlank() ? "" : " &nbsp;·&nbsp; Supplier: <b>" + esc(cur.supplier) + "</b>")
                     + "</html>");
@@ -404,8 +414,9 @@ final class StockDialogs {
                 } else {
                     result.setText(BadOrderService.preview(cur.stock, q, cur.cost, custom));
                 }
-                result.setForeground(q != null && q > cur.stock ? Theme.DANGER : Theme.TEXT);
-                if (q != null && q > cur.stock) error.setText("Only " + cur.stock + " in stock.");
+                boolean tooMany = q != null && BigDecimal.valueOf(q).compareTo(cur.stock) > 0;
+                result.setForeground(tooMany ? Theme.DANGER : Theme.TEXT);
+                if (tooMany) error.setText("Only " + Money.qty(cur.stock) + " in stock.");
             } catch (IllegalArgumentException ex) {
                 result.setText(" ");
                 error.setText(ex.getMessage());
@@ -544,8 +555,8 @@ final class StockDialogs {
                                         + (quantity == 0 ? "Part of one item" : String.valueOf(quantity)) + " "
                                         + BadOrderService.reasonLabel(r).toLowerCase() + ", "
                                         + BadOrderService.dispositionLabel(disp).toLowerCase() + " (found " + foundOn + ")."
-                                        + (quantity == 0 ? "\nStock stays " + res.stockAfter + ". "
-                                        : "\nStock " + res.stockBefore + " → " + res.stockAfter + ". ")
+                                        + (quantity == 0 ? "\nStock stays " + Money.qty(res.stockAfter) + ". "
+                                        : "\nStock " + Money.qty(res.stockBefore) + " → " + Money.qty(res.stockAfter) + ". ")
                                         + (res.loss == null ? "No puhunan, so no peso loss was counted."
                                         : "Loss " + Money.peso(res.loss) + (custom != null ? " (set by hand)" : "")
                                         + " lowers net profit."),
@@ -576,7 +587,7 @@ final class StockDialogs {
         @Override
         public String toString() {
             if (product == null) return "Choose a product...";
-            return product.name + "  (" + product.stock + " in stock)";
+            return product.name + "  (" + Money.qty(product.stock) + " in stock)";
         }
     }
 

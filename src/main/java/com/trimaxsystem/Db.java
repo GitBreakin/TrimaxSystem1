@@ -18,10 +18,12 @@ final class Db {
     static final String UPDATE_27_EXPENSES = "database update 20261027_02_expenses";
     static final String UPDATE_28_BAD_ORDERS = "database update 20261028_04_bad_orders";
     static final String UPDATE_28_BAD_ORDER_LOSS = "database update 20261028_06_bad_order_custom_loss";
+    static final String UPDATE_28_HALF_CASE = "database update 20261028_07_half_case";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
     private static volatile boolean badOrdersReady;
+    private static volatile boolean halfCaseReady;
 
     private Db() {
     }
@@ -95,6 +97,25 @@ final class Db {
             return false;
         }
         return badOrdersReady;
+    }
+
+    /**
+     * True when the server sells half cases (20261028_07): stock can end in .5, sale and booking lines carry a
+     * unit, and products have a half case price.
+     */
+    static boolean halfCaseReady() {
+        if (halfCaseReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.set_product_half_price(text,integer,numeric)') is not null "
+                             + "and exists (select 1 from information_schema.columns where table_schema = 'public' "
+                             + "and table_name = 'sale_items' and column_name = 'stock_qty')");
+             ResultSet rs = ps.executeQuery()) {
+            halfCaseReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return halfCaseReady;
     }
 
     /** The update the bad-order screens still need ("" when the server has it). */

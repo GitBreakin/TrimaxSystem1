@@ -65,4 +65,55 @@ class SaleCartTest {
         c.setDiscount(1, d("5.50"));
         assertEquals(1, c.belowCost().size());
     }
+
+    // ---- half cases (sql/20261028_07)
+
+    @Test
+    void halfCaseLinesAreSeparateAndUseTheHalfPrice() {
+        SaleCart c = new SaleCart();
+        c.add(1, "Cola", d("250.00"), d("200.00"), d("10"), false);
+        c.add(1, "Cola", d("125.00"), d("200.00"), d("10"), true);
+        c.add(1, "Cola", d("125.00"), d("200.00"), d("10"), true);
+        assertEquals(2, c.lines().size(), "one whole line and one half line");
+        SaleCart.Line half = c.lines().get(1);
+        assertTrue(half.half);
+        assertEquals("Cola (half case)", half.label());
+        assertEquals(2, half.quantity);
+        assertEquals(d("100.00"), half.cost, "a half case's puhunan is half the case's");
+        assertEquals(d("2"), c.casesOf(1).stripTrailingZeros(), "1 whole + 2 halves = 2 cases");
+        assertEquals(d("500.00"), c.subtotal());
+        assertNull(c.problem());
+        assertEquals("[{\"product_id\":1,\"quantity\":1,\"discount\":0},"
+                + "{\"product_id\":1,\"quantity\":2,\"discount\":0,\"unit\":\"HALF\"}]", c.itemsJson());
+    }
+
+    @Test
+    void halfCasesCountAgainstTheStockTogether() {
+        SaleCart c = new SaleCart();
+        assertNull(c.addProblem(1, "Cola", d("1.5"), false));
+        c.add(1, "Cola", d("250.00"), d("200.00"), d("1.5"), false);
+        assertNull(c.addProblem(1, "Cola", d("1.5"), true), "0.5 is left");
+        c.add(1, "Cola", d("125.00"), d("200.00"), d("1.5"), true);
+        assertNotNull(c.addProblem(1, "Cola", d("1.5"), true), "nothing left");
+        assertNotNull(c.addProblem(1, "Cola", d("1.5"), false));
+        assertNotNull(c.quantityProblem(1, 2), "2 halves + 1 whole = 2 > 1.5");
+        assertNull(c.quantityProblem(1, 1));
+        assertNotNull(c.addProblem(2, "Candy", d("0"), true), "out of stock");
+        assertNull(c.addProblem(2, "Candy", d("0.5"), true), "a half case can be sold from 0.5");
+        assertNotNull(c.addProblem(2, "Candy", d("0.5"), false), "a whole case cannot");
+        c.setQuantity(1, 2);
+        assertTrue(c.problem().contains("Only 1.5"), c.problem());
+    }
+
+    @Test
+    void halfCaseBelowPuhunanIsFlagged() {
+        SaleCart c = new SaleCart();
+        c.add(1, "Cola", d("125.00"), d("200.00"), d("10"), true);
+        c.setDiscount(0, d("25.00"));
+        assertTrue(c.belowCost().isEmpty(), "100.00 = half the puhunan: not below");
+        c.setDiscount(0, d("25.01"));
+        assertEquals(java.util.List.of("Cola (half case)"), c.belowCost());
+        assertNull(SaleCart.halfCost(null));
+        assertEquals(d("22.53"), SaleCart.halfCost(d("45.05")), "rounded to the centavo like the database");
+    }
 }

@@ -283,8 +283,8 @@ public class AnalyticsPanel extends JPanel {
         }
         productModel.setRowCount(0);
         for (ReportService.ProductRow p : r.products) {
-            productModel.addRow(new Object[]{p.name, p.quantity, p.bookings, MONEY.format(p.value),
-                    p.stockNow == null ? "-" : p.stockNow});
+            productModel.addRow(new Object[]{p.name, Money.qty(p.quantity), p.bookings, MONEY.format(p.value),
+                    p.stockNow == null ? "-" : Money.qty(p.stockNow)});
         }
         exceptionModel.setRowCount(0);
         for (List<String> row : exceptionRows(r)) exceptionModel.addRow(row.toArray());
@@ -430,8 +430,8 @@ public class AnalyticsPanel extends JPanel {
                 t.header = List.of("Product", "Quantity ordered", "Bookings", "Value (PHP)", "Stock now");
                 t.firstNumericCol = 1;
                 for (ReportService.ProductRow p : current.products) {
-                    t.rows.add(List.of(p.name, String.valueOf(p.quantity), String.valueOf(p.bookings), money(p.value),
-                            p.stockNow == null ? "" : String.valueOf(p.stockNow)));
+                    t.rows.add(List.of(p.name, Money.qty(p.quantity), String.valueOf(p.bookings), money(p.value),
+                            p.stockNow == null ? "" : Money.qty(p.stockNow)));
                 }
                 name = "trimax-products_" + range;
             }
