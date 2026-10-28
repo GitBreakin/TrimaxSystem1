@@ -228,4 +228,26 @@ psql_owner -f 20261028_02_suppliers.sql
 psql_owner -f 20261028_03_sales_inventory_intelligence.sql
 check "select count(*) = 5 from pg_proc where proname in ('save_supplier', 'products_add_supplier', 'product_insights', 'refresh_inventory_alerts', 'sold_lines')" "suppliers and intelligence re-apply after rollback"
 check "select exists (select 1 from suppliers where name = 'After Rollback Supplier')" "re-apply adds suppliers used while it was rolled back"
+echo "== Bad orders (twice: re-runnable)"
+psql_owner -f 20261028_04_bad_orders.sql
+psql_owner -f 20261028_04_bad_orders.sql
+psql_su -d "$DB" -f tests/51_bad_orders_tests.sql > "/tmp/$DB.51.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL BAD ORDER/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.51.log"
+grep -q '^ALL BAD ORDER SQL TESTS PASSED' "/tmp/$DB.51.log" || { echo "FAIL bad order tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.51.log"
+echo "== Bad orders rollback, then re-apply"
+bo_rows="$(psql_owner -tAc "select count(*) from bad_orders")"
+bo_moves="$(psql_owner -tAc "select count(*) from inventory_movements where kind in ('BAD_ORDER', 'BAD_ORDER_VOIDED')")"
+stock_sum="$(psql_owner -tAc "select sum(stock) from products")"
+psql_owner -f 20261028_94_rollback_bad_orders.sql
+check "select count(*) = 0 from pg_proc where proname in ('record_bad_order', 'void_bad_order', 'bad_order_label')" "rollback removed the bad-order functions"
+check "select pg_get_function_result('trimax_private.profit_summary(timestamptz,timestamptz)'::regprocedure) not like '%bad_orders%' and pg_get_function_result('trimax_private.profit_trend(timestamptz,timestamptz,text)'::regprocedure) not like '%bad_orders%'" "rollback put back the reports without bad orders"
+check "select bool_and(net_profit = gross_profit - payroll_paid - payroll_unpaid - other_expenses) from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after rollback net profit = gross profit - payroll - other expenses again"
+check "select (select count(*) from bad_orders) = $bo_rows and (select count(*) from inventory_movements where kind in ('BAD_ORDER', 'BAD_ORDER_VOIDED')) = $bo_moves and (select sum(stock) from products) = $stock_sum" "rollback kept every bad order ($bo_rows), its stock history ($bo_moves lines) and the stock"
+if psql_owner -c "delete from bad_orders" >/dev/null 2>&1; then echo "FAIL bad orders could be deleted after rollback"; exit 1; fi
+echo "PASS after rollback bad orders still cannot be deleted"
+psql_owner -f 20261028_04_bad_orders.sql
+check "select count(*) = 3 from pg_proc where proname in ('record_bad_order', 'void_bad_order', 'bad_order_label')" "bad orders re-apply after rollback"
+check "select count(*) = $bo_rows from bad_orders" "re-apply continues from the same bad orders"
+check "select bad_orders_count > 0 and net_profit = gross_profit - payroll_paid - payroll_unpaid - other_expenses - bad_orders_loss from trimax_private.profit_summary(now() - interval '30 days', now() + interval '1 day')" "after re-apply the report counts the bad orders again"
 echo "ALL DATABASE TESTS PASSED"

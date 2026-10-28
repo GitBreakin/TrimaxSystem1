@@ -34,7 +34,8 @@
 --    read_at / read_by); only the database owner (Desktop) can read them.
 --
 -- ORDER: after 20261027_04. Re-runnable. Rollback: 20261028_90_rollback_location_history_and_booking_notifications.sql
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 18:33 Asia/Manila) as migration
+-- 20261028_01_location_history_and_booking_notifications (from another session); its functions equal this file.
 -- =====================================================================================================
 
 begin;

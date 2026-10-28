@@ -16,9 +16,20 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
 | `20261027_03` Driver app: own assigned vehicle (`trimax_driver_my_vehicle`) | **Applied 2026-10-27** (about 04:05) with approval |
 | `20261027_04` agent discounts per item | **Applied 2026-10-27 ~04:50** with approval. Dry run on a copy of production: no row or total changed. After: 108/108 fingerprints equal the rebuild (`fc6970f1…`). Install the new APK + Desktop |
-| `20261028_01` location history (Admin only) + "New booking" Admin notification | **Not applied.** Needs approval. No new APK needed (recorded by the existing location call) |
-| `20261028_02` supplier list (Inventory drop-down) | **Not applied.** Needs approval |
-| `20261028_03` Sales & Inventory Intelligence (analysis, settings, inventory alerts) | **Not applied.** Needs approval. See docs/SALES_INVENTORY_INTELLIGENCE.md |
+| `20261028_01` location history (Admin only) + "New booking" Admin notification | **Applied 2026-10-28 18:33** (from another session; not by the run that applied `_02` to `_04`). Its 5 functions equal the repo version (checked). No new APK needed (recorded by the existing location call) |
+| `20261028_02` supplier list (Inventory drop-down) | **Applied 2026-10-28 ~22:20** with the owner's approval (1 transaction). 8 suppliers taken from the 11 products; no product changed |
+| `20261028_03` Sales & Inventory Intelligence (analysis, settings, inventory alerts) | **Applied 2026-10-28 ~22:20** with the owner's approval (1 transaction). See docs/SALES_INVENTORY_INTELLIGENCE.md |
+| `20261028_04` bad orders (broken, damaged, expired... stock out as a loss in net profit) | **Applied 2026-10-28 ~22:20** with the owner's approval (1 transaction). See docs/BAD_ORDERS.md |
+
+`20261028_02` to `_04` were checked in this order:
+- **Before:** the production functions they build on had the same fingerprints as a local rebuild through `20261028_01`.
+- **Dry run:** a local copy with the 11 production products, applied twice. There were no errors and no product changed.
+- **After:**
+  - The 11 new or replaced functions had the same fingerprints as the dry run.
+  - The API roles had no access to the new tables, sequence or functions.
+  - Products (11, stock 698), stock history (104), bookings, sales, notifications and the audit log were unchanged.
+  - The month's profit figures were identical, with the new bad-order columns at 0.
+  - `record_bad_order` refused a non-Admin.
 
 ## Files (run in this order)
 
@@ -43,6 +54,8 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `sql/20261028_92_rollback_suppliers.sql` | Drops the trigger and functions; keeps the list | — |
 | `sql/20261028_03_sales_inventory_intelligence.sql` | `trimax_private.inventory_insight_settings` (thresholds, incl. ASSUMED lead/safety/target days), `sold_lines()` (completed bookings + completed sales), `product_insights(from, to)` (per product: units, revenue, previous period, last sale, per day, days of stock, flags with reasons and actions, restock quantity), `inventory_alert_state` + `refresh_inventory_alerts(admin)` (one "Inventory insight" notification per newly applying condition, 7-day repeat limit, advisory lock). Owner only | Adds 2 tables, 3 functions; changes no row except new notifications |
 | `sql/20261028_93_rollback_sales_inventory_intelligence.sql` | Drops the 3 functions; keeps settings, alert state and notifications | — |
+| `sql/20261028_04_bad_orders.sql` | `inventory_movements` kind check widened with `BAD_ORDER` / `BAD_ORDER_VOIDED`. `public.bad_orders` (product, name and supplier snapshot, pieces, reason, thrown away / returned to supplier, date found, puhunan and loss snapshot, note, link to its stock movement, who/when, undo fields; guarded: no delete, only undo). Owner-only `record_bad_order` (Active Admin, pieces <= stock, same request id = same bad order, audited) and `void_bad_order` (stock back, audited). `profit_summary` / `profit_trend` re-created with `bad_orders_loss`, `bad_orders_count`, `bad_orders_no_cost` / `bad_orders` at the end, subtracted from `net_profit`. Also: the suppliers id sequence is revoked from the API roles (in `20261028_02`) | Adds 1 table, 1 trigger, 4 functions; replaces 2 report functions; changes no row |
+| `sql/20261028_94_rollback_bad_orders.sql` | Puts back the `20261027_02` reports; drops the bad-order functions; keeps every bad order, its stock history and the stock | — |
 | `sql/20261027_90_rollback_per_item_discounts.sql` | Puts back the `20261027_01` functions exactly; keeps both columns and their values | — |
 | `sql/20261027_91_rollback_driver_my_vehicle.sql` | Drops that function | — |
 | `sql/20261027_92_rollback_expenses.sql` | Undoes `20261027_02`'s behaviour: puts back the 2 report functions exactly as `20261027_01` (same body hash) and drops `save_expense` / `void_expense`; keeps both tables, their rows and their protection | — |

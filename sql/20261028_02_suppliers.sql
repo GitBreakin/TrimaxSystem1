@@ -15,7 +15,8 @@
 --
 -- ORDER: after 20261027_04 (independent of 20261028_01). Re-runnable.
 -- Rollback: 20261028_92_rollback_suppliers.sql (keeps the list).
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 22:20 Asia/Manila) with the owner's approval, as migration
+-- 20261028_02_suppliers (one transaction).
 -- =====================================================================================================
 
 begin;
@@ -38,6 +39,11 @@ create table if not exists public.suppliers (
 create unique index if not exists suppliers_name_key on public.suppliers (name_key);
 alter table public.suppliers enable row level security;
 revoke all on table public.suppliers from public, anon, authenticated, service_role;
+do $$
+begin
+    execute 'revoke all on sequence ' || pg_get_serial_sequence('public.suppliers', 'supplier_id')
+            || ' from public, anon, authenticated, service_role';
+end $$;
 comment on table public.suppliers is 'Supplier names the Admin picks from in Inventory (Desktop only).';
 
 insert into public.suppliers (name)

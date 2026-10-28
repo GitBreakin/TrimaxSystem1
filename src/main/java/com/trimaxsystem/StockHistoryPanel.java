@@ -13,7 +13,8 @@ import javax.swing.table.DefaultTableModel;
 
 /**
  * Inventory > Stock history: every addition and deduction of stock (starting stock, restocks with
- * their cost, corrections with their reason, bookings, sales, voids and cancellations), newest first.
+ * their cost, corrections with their reason, bad orders, bookings, sales, voids and cancellations),
+ * newest first.
  */
 final class StockHistoryPanel extends JPanel {
 
@@ -21,7 +22,8 @@ final class StockHistoryPanel extends JPanel {
     private static final String[][] KINDS = {
             {"All changes", null}, {"Restocks", "RESTOCK"}, {"Sales (Walk-In / In-House)", "SALE"},
             {"Bookings", "BOOKING"}, {"Corrections", "ADJUSTMENT"}, {"Starting stock", "INITIAL"},
-            {"Voided sales", "SALE_VOIDED"}, {"Cancelled bookings", "BOOKING_CANCELLED"}};
+            {"Bad orders", "BAD_ORDER"}, {"Voided sales", "SALE_VOIDED"}, {"Cancelled bookings", "BOOKING_CANCELLED"},
+            {"Bad orders undone", "BAD_ORDER_VOIDED"}};
 
     private final JComboBox<Item> product = new JComboBox<>();
     private final JComboBox<String> kind = new JComboBox<>();
@@ -126,10 +128,12 @@ final class StockHistoryPanel extends JPanel {
             case "Restock":
             case "Starting stock":
             case "Sale voided":
+            case "Bad order undone":
             case "Booking cancelled": return Theme.OK;
             case "Sale":
             case "Booking": return Theme.BLUE;
             case "Correction": return Theme.WARN;
+            case "Bad order": return Theme.DANGER;
             default: return Theme.MUTED;
         }
     }
@@ -216,13 +220,15 @@ final class StockHistoryPanel extends JPanel {
                     (m.change > 0 ? "+" : "") + m.change,
                     m.before + " → " + m.after,
                     m.unitCost == null ? "" : Money.plain(m.unitCost),
-                    "RESTOCK".equals(m.kind) && m.totalCost != null ? Money.plain(m.totalCost) : "",
+                    ("RESTOCK".equals(m.kind) || "BAD_ORDER".equals(m.kind)) && m.totalCost != null ? Money.plain(m.totalCost) : "",
                     InventoryService.referenceText(m),
                     m.actor == null ? "" : m.actor,
                     m.note == null ? "" : m.note});
         }
         summary.setText("In: " + h.unitsIn + " units   ·   Out: " + h.unitsOut + " units   ·   Restocked: "
                 + h.restockUnits + " units for " + Money.peso(h.restockCost) + " (stock purchases, not sales)"
+                + (h.badOrderUnits == 0 ? "" : "   ·   Bad orders: " + h.badOrderUnits + " units, "
+                        + Money.peso(h.badOrderCost) + " puhunan")
                 + (h.truncated ? "   ·   showing the latest " + LIMIT + " changes" : ""));
         cards.show(center, "table");
     }

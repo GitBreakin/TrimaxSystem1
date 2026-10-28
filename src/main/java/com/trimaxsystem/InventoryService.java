@@ -14,7 +14,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Products, restocking, stock corrections and the stock history for the Inventory page.
+ * Products, restocking, stock corrections and the stock history for the Inventory page (bad orders:
+ * {@link BadOrderService}).
  * Saving goes through the database functions of 20261027_01 (Admin checked there, retry-safe);
  * reading works on older databases too (pricing columns are then simply absent).
  */
@@ -197,6 +198,8 @@ final class InventoryService {
             case "BOOKING_CHANGED": return "Booking changed";
             case "SALE": return "Sale";
             case "SALE_VOIDED": return "Sale voided";
+            case "BAD_ORDER": return "Bad order";
+            case "BAD_ORDER_VOIDED": return "Bad order undone";
             default: return kind;
         }
     }
@@ -216,6 +219,9 @@ final class InventoryService {
         int restockUnits;
         BigDecimal restockCost = BigDecimal.ZERO;
         int unitsIn, unitsOut;
+        /** Bad orders (BAD_ORDER) in the range: pieces out and their puhunan (undone ones come back as "in"). */
+        int badOrderUnits;
+        BigDecimal badOrderCost = BigDecimal.ZERO;
     }
 
     /**
@@ -235,7 +241,9 @@ final class InventoryService {
         String totals = "select coalesce(sum(quantity_change) filter (where kind = 'RESTOCK'), 0), "
                 + "coalesce(sum(total_cost) filter (where kind = 'RESTOCK'), 0), "
                 + "coalesce(sum(quantity_change) filter (where quantity_change > 0), 0), "
-                + "coalesce(-sum(quantity_change) filter (where quantity_change < 0), 0) " + where;
+                + "coalesce(-sum(quantity_change) filter (where quantity_change < 0), 0), "
+                + "coalesce(-sum(quantity_change) filter (where kind = 'BAD_ORDER'), 0), "
+                + "coalesce(sum(total_cost) filter (where kind = 'BAD_ORDER'), 0) " + where;
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              PreparedStatement pt = conn.prepareStatement(totals)) {
@@ -254,6 +262,8 @@ final class InventoryService {
                 h.restockCost = rs.getBigDecimal(2);
                 h.unitsIn = rs.getInt(3);
                 h.unitsOut = rs.getInt(4);
+                h.badOrderUnits = rs.getInt(5);
+                h.badOrderCost = rs.getBigDecimal(6);
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -291,6 +301,7 @@ final class InventoryService {
         if (m.referenceId == null || m.referenceId.isEmpty()) return "";
         if ("booking".equals(m.referenceType)) return "Booking #" + m.referenceId;
         if ("sale".equals(m.referenceType)) return "Receipt " + m.referenceId;
+        if ("bad_order".equals(m.referenceType)) return "Bad order #" + m.referenceId;
         return m.referenceId;
     }
 }

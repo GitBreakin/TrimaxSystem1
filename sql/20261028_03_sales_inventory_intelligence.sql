@@ -30,7 +30,8 @@
 --
 -- ORDER: after 20261027_04 (and 20261028_01 for nothing; independent). Re-runnable.
 -- Rollback: 20261028_93_rollback_sales_inventory_intelligence.sql (keeps settings, alert state, notifications).
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 22:20 Asia/Manila) with the owner's approval, as migration
+-- 20261028_03_sales_inventory_intelligence (one transaction).
 -- =====================================================================================================
 
 begin;

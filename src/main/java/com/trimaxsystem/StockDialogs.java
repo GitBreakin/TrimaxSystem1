@@ -2,6 +2,7 @@ package com.trimaxsystem;
 
 import java.awt.*;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -9,7 +10,8 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
 /**
- * Restock (newly bought stock with its cost per unit) and Correct stock (a reason is required).
+ * Restock (newly bought stock with its cost per unit), Correct stock (a reason is required) and Bad order
+ * (broken, damaged, expired... items taken out of stock as a loss).
  * Each dialog keeps one request id, so a double click or a retry after a lost connection never adds
  * the stock twice; the database checks everything again.
  */
@@ -154,8 +156,12 @@ final class StockDialogs {
 
     private static final String[] REASONS = {"Count difference", "Damaged", "Expired", "Returned by customer", "Lost", "Other"};
 
-    /** @return true when the stock was corrected (the caller reloads). */
-    static boolean adjust(Window owner, InventoryService.Product p) {
+    /**
+     * badOrders: the server has bad orders (20261028_04); then Damaged / Expired point to Bad order, so the
+     * loss is counted.
+     * @return true when the stock was corrected (the caller reloads).
+     */
+    static boolean adjust(Window owner, InventoryService.Product p, boolean badOrders) {
         JDialog d = new JDialog(owner, "Correct stock: " + p.name, Dialog.ModalityType.APPLICATION_MODAL);
         final UUID requestId = Db.requestId();
         final boolean[] saved = {false};
@@ -182,8 +188,17 @@ final class StockDialogs {
         error.setFont(Theme.SMALL);
         error.setForeground(Theme.DANGER);
 
+        final String boText = "<html><div style='width:380px'>Broken, damaged or expired items: use <b>Bad order...</b> "
+                + "instead, so their puhunan is counted as a loss in Sales &amp; Profit.</div></html>";
+        JLabel boHint = new JLabel(boText);
+        boHint.setFont(Theme.SMALL);
+        boHint.setForeground(Theme.WARN);
+        boHint.setPreferredSize(boHint.getPreferredSize());   // keeps its room while it is empty
+        boHint.setVisible(badOrders);
         Runnable recalc = () -> {
             error.setText(" ");
+            String why = (String) reason.getSelectedItem();
+            boHint.setText(remove.isSelected() && ("Damaged".equals(why) || "Expired".equals(why)) ? boText : "");
             try {
                 int q = qty.getText().isBlank() ? 0 : Money.parseInt(qty.getText(), "quantity", 1, 1_000_000);
                 int after = p.stock + (add.isSelected() ? q : -q);
@@ -198,6 +213,7 @@ final class StockDialogs {
         qty.getDocument().addDocumentListener(listener(recalc));
         remove.addActionListener(e -> recalc.run());
         add.addActionListener(e -> recalc.run());
+        reason.addActionListener(e -> recalc.run());
         recalc.run();
 
         JPanel form = new JPanel(new GridBagLayout());
@@ -228,6 +244,8 @@ final class StockDialogs {
         g.gridy++;
         g.gridwidth = 2;
         form.add(UiKit.group("Details", detail), g);
+        g.gridy++;
+        form.add(boHint, g);
         g.gridy++;
         form.add(result, g);
         g.gridy++;
@@ -282,6 +300,225 @@ final class StockDialogs {
 
         show(d, owner, form, save, cancel, "Fix the stock count, with the reason");
         return saved[0];
+    }
+
+    /**
+     * Bad order (BO): broken, damaged, expired, defective or spoiled pieces taken out of stock, with what
+     * happened to them and the date found. The loss (pieces × puhunan) lowers net profit by that date.
+     * p: the product to start with (null = choose); choices: the products to choose from (null = only p).
+     * @return true when it was recorded (the caller reloads).
+     */
+    static boolean badOrder(Window owner, InventoryService.Product p, java.util.Collection<InventoryService.Product> choices) {
+        JDialog d = new JDialog(owner, p == null ? "Bad order" : "Bad order: " + p.name, Dialog.ModalityType.APPLICATION_MODAL);
+        final UUID requestId = Db.requestId();
+        final boolean[] saved = {false};
+        final LocalDate today = LocalDate.now(Theme.BUSINESS_TZ);
+
+        JComboBox<ProductChoice> product = new JComboBox<>();
+        java.util.List<InventoryService.Product> list = new java.util.ArrayList<>();
+        if (choices != null) list.addAll(choices);
+        else if (p != null) list.add(p);
+        list.sort(java.util.Comparator.comparing(x -> x.name.toLowerCase()));
+        if (p == null) product.addItem(new ProductChoice(null));
+        for (InventoryService.Product x : list) {
+            ProductChoice c = new ProductChoice(x);
+            product.addItem(c);
+            if (p != null && x.id == p.id) product.setSelectedItem(c);
+        }
+        product.setFont(Theme.SUBTLE);
+        product.setEnabled(choices != null);
+
+        JTextField qty = new JTextField(8);
+        JComboBox<String> reason = new JComboBox<>();
+        for (String[] r : BadOrderService.REASONS) reason.addItem(r[1]);
+        JRadioButton disposed = new JRadioButton(BadOrderService.DISPOSITIONS[0][1], true);
+        JRadioButton returned = new JRadioButton(BadOrderService.DISPOSITIONS[1][1]);
+        ButtonGroup what = new ButtonGroup();
+        what.add(disposed);
+        what.add(returned);
+        for (JRadioButton b : new JRadioButton[]{disposed, returned}) {
+            b.setOpaque(false);
+            b.setFont(Theme.SUBTLE);
+        }
+        JTextField found = new JTextField(10);
+        found.setText(today.toString());
+        found.setToolTipText("YYYY-MM-DD: the day the bad items were found (Asia/Manila)");
+        JTextField note = new JTextField(26);
+        JLabel now = new JLabel(" ");
+        JLabel result = new JLabel(" ");
+        JLabel error = new JLabel(" ");
+        UiKit.styleField(qty);
+        UiKit.styleField(found);
+        UiKit.styleField(note);
+        UiKit.placeholder(qty, "e.g. 3");
+        UiKit.placeholder(note, "What happened (required for Other)");
+        reason.setFont(Theme.SUBTLE);
+        now.setFont(Theme.SUBTLE);
+        result.setFont(Theme.font(Font.BOLD, 14));
+        error.setFont(Theme.SMALL);
+        error.setForeground(Theme.DANGER);
+
+        Runnable recalc = () -> {
+            error.setText(" ");
+            InventoryService.Product cur = ((ProductChoice) product.getSelectedItem()).product;
+            if (cur == null) {
+                now.setText("Choose the product.");
+                result.setText(" ");
+                return;
+            }
+            now.setText("<html>In stock now: <b>" + cur.stock + "</b> &nbsp;·&nbsp; Puhunan: <b>"
+                    + (cur.cost == null ? "none" : Money.peso(cur.cost)) + "</b>"
+                    + (cur.supplier == null || cur.supplier.isBlank() ? "" : " &nbsp;·&nbsp; Supplier: <b>" + esc(cur.supplier) + "</b>")
+                    + "</html>");
+            try {
+                int q = qty.getText().isBlank() ? 0 : Money.parseInt(qty.getText(), "quantity", 1, 1_000_000);
+                result.setText(q == 0 ? " " : BadOrderService.preview(cur.stock, q, cur.cost));
+                result.setForeground(q > cur.stock ? Theme.DANGER : Theme.TEXT);
+                if (q > cur.stock) error.setText("Only " + cur.stock + " in stock.");
+            } catch (IllegalArgumentException ex) {
+                result.setText(" ");
+                error.setText(ex.getMessage());
+            }
+        };
+        qty.getDocument().addDocumentListener(listener(recalc));
+        product.addActionListener(e -> recalc.run());
+        recalc.run();
+
+        JButton todayBtn = UiKit.secondaryButton("Today");
+        todayBtn.addActionListener(e -> found.setText(today.toString()));
+
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        GridBagConstraints g = new GridBagConstraints();
+        g.gridx = 0;
+        g.gridy = 0;
+        g.gridwidth = 2;
+        g.anchor = GridBagConstraints.WEST;
+        g.fill = GridBagConstraints.HORIZONTAL;
+        g.insets = new Insets(0, 0, 10, 10);
+        if (choices != null) {
+            form.add(UiKit.group("Product", product), g);
+            g.gridy++;
+        }
+        form.add(now, g);
+        g.gridy++;
+        g.gridwidth = 1;
+        g.weightx = 0.5;
+        form.add(UiKit.group("Bad pieces", qty), g);
+        g.gridx = 1;
+        form.add(UiKit.group("Reason", reason), g);
+        g.gridx = 0;
+        g.gridy++;
+        JPanel whatRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        whatRow.setOpaque(false);
+        whatRow.add(disposed);
+        whatRow.add(Box.createHorizontalStrut(12));
+        whatRow.add(returned);
+        form.add(UiKit.group("What happened to them", whatRow), g);
+        g.gridx = 1;
+        JPanel dateRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        dateRow.setOpaque(false);
+        dateRow.add(found);
+        dateRow.add(todayBtn);
+        form.add(UiKit.group("Date found", dateRow), g);
+        g.gridx = 0;
+        g.gridy++;
+        g.gridwidth = 2;
+        form.add(UiKit.group("Note", note), g);
+        g.gridy++;
+        form.add(result, g);
+        g.gridy++;
+        JLabel hint = new JLabel("<html><div style='width:440px'>The pieces leave the stock now. Their puhunan is a loss: "
+                + "it lowers net profit in Sales &amp; Profit on the date found. A mistake can be undone in "
+                + "Inventory → Bad orders.</div></html>");
+        hint.setFont(Theme.SMALL);
+        hint.setForeground(Theme.MUTED);
+        form.add(hint, g);
+        g.gridy++;
+        form.add(error, g);
+
+        JButton save = UiKit.dangerButton("Record bad order");
+        JButton cancel = UiKit.secondaryButton("Cancel");
+        cancel.addActionListener(e -> d.dispose());
+        save.addActionListener(e -> {
+            final InventoryService.Product cur = ((ProductChoice) product.getSelectedItem()).product;
+            if (cur == null) {
+                error.setText("Choose the product.");
+                return;
+            }
+            Integer q;
+            try {
+                q = Money.parseInt(qty.getText(), "bad pieces", 1, 1_000_000);
+            } catch (IllegalArgumentException ex) {
+                q = null;
+            }
+            LocalDate day;
+            try {
+                day = LocalDate.parse(found.getText().trim());
+            } catch (java.time.format.DateTimeParseException ex) {
+                day = null;
+            }
+            final String r = BadOrderService.REASONS[Math.max(0, reason.getSelectedIndex())][0];
+            final String n = note.getText().trim();
+            String problem = BadOrderService.check(q, cur.stock, r, n, day, today);
+            if (problem != null) {
+                error.setText(problem);
+                return;
+            }
+            final int quantity = q;
+            final LocalDate foundOn = day;
+            final String disp = BadOrderService.DISPOSITIONS[returned.isSelected() ? 1 : 0][0];
+            save.setEnabled(false);
+            cancel.setEnabled(false);
+            product.setEnabled(false);
+            save.setText("Saving...");
+            new SwingWorker<BadOrderService.Result, Void>() {
+                @Override
+                protected BadOrderService.Result doInBackground() throws Exception {
+                    return BadOrderService.record(cur.id, quantity, r, disp, foundOn, n.isEmpty() ? null : n, requestId);
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        BadOrderService.Result res = get();
+                        saved[0] = true;
+                        d.dispose();
+                        JOptionPane.showMessageDialog(owner, cur.name + "\n" + quantity + " "
+                                        + BadOrderService.reasonLabel(r).toLowerCase() + ", "
+                                        + BadOrderService.dispositionLabel(disp).toLowerCase() + " (found " + foundOn + ")."
+                                        + "\nStock " + res.stockBefore + " → " + res.stockAfter + ". "
+                                        + (res.loss == null ? "No puhunan, so no peso loss was counted."
+                                        : "Loss " + Money.peso(res.loss) + " (lowers net profit)."),
+                                "Bad order recorded", JOptionPane.INFORMATION_MESSAGE);
+                    } catch (Exception ex) {
+                        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                        error.setText("<html>" + esc(cause.getMessage()) + "</html>");
+                        save.setEnabled(true);
+                        cancel.setEnabled(true);
+                        product.setEnabled(choices != null);
+                        save.setText("Try again");
+                    }
+                }
+            }.execute();
+        });
+
+        show(d, owner, form, save, cancel, "Broken, damaged, expired, defective or spoiled items");
+        return saved[0];
+    }
+
+    private static final class ProductChoice {
+        final InventoryService.Product product;
+
+        ProductChoice(InventoryService.Product product) {
+            this.product = product;
+        }
+
+        @Override
+        public String toString() {
+            if (product == null) return "Choose a product...";
+            return product.name + "  (" + product.stock + " in stock)";
+        }
     }
 
     private static void show(JDialog d, Window owner, JPanel form, JButton primary, JButton cancel, String subtitle) {

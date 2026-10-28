@@ -19,9 +19,9 @@ public class MainFrame extends JFrame {
     private static final String[][] PAGES = {
             // { sidebar label, header title, header subtitle }
             {"Dashboard", "Dashboard", "Overview of today's operations"},
-            {"Sales & Profit", "Sales & Profit", "Net sales, cost of goods, gross profit, payroll, other expenses and net profit"},
+            {"Sales & Profit", "Sales & Profit", "Net sales, cost of goods, gross profit, payroll, other expenses, bad orders and net profit"},
             {"Walk-In / In-House", "Walk-In / In-House Sales", "Sell at the store or for a saved customer; receipts, payments and voids"},
-            {"Inventory", "Inventory", "Products, puhunan and patong, prices, restocking and stock history"},
+            {"Inventory", "Inventory", "Products, puhunan and patong, prices, restocking, bad orders and stock history"},
             {"Bookings", "Bookings", "All bookings and their status"},
             {"Live GPS Monitoring", "Live GPS Monitoring", "Last known vehicle and agent positions, and recorded location history"},
             {"Manage Vehicles", "Manage Vehicles", "Vehicle records, status, and driver assignments"},
