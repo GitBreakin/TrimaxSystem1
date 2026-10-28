@@ -20,6 +20,10 @@ import java.util.UUID;
  * every field again, records the stock change (BAD_ORDER) and the loss (quantity × puhunan), and keeps
  * a retry with the same request id from taking the stock out twice. The loss lowers net profit in
  * Sales & Profit by the date found. A mistake is undone (voided) with a reason; nothing is deleted.
+ *
+ * Loss set by hand (sql/20261028_06): the Admin may type the amount instead (e.g. P10 for one bottle of a
+ * 6-pack whose puhunan is per pack). Then the pieces may be 0: only part of one item was bad, the stock
+ * stays the same and only the amount is recorded.
  */
 final class BadOrderService {
 
@@ -35,6 +39,8 @@ final class BadOrderService {
             {"DISPOSED", "Thrown away"}, {"RETURNED_TO_SUPPLIER", "Returned to supplier"}};
     /** How far back a date found may go (the database allows the same). */
     static final int MAX_DAYS_BACK = 366;
+    /** Largest amount that can be set by hand (the database allows the same). */
+    static final BigDecimal MAX_CUSTOM_LOSS = new BigDecimal("10000000");
 
     static String reasonLabel(String code) {
         return label(REASONS, code);
@@ -58,10 +64,19 @@ final class BadOrderService {
 
     /**
      * The problem with the input, or null when it can be sent (the database checks again).
-     * quantity null = not a whole number.
+     * quantity null = not a whole number. customLoss: the amount set by hand, or null for pieces x puhunan.
      */
-    static String check(Integer quantity, int stock, String reason, String note, LocalDate found, LocalDate today) {
-        if (quantity == null || quantity < 1) return "Enter how many pieces are bad (1 or more).";
+    static String check(Integer quantity, int stock, String reason, String note, LocalDate found, LocalDate today,
+                        BigDecimal customLoss) {
+        if (customLoss != null) {
+            if (customLoss.signum() <= 0 || customLoss.compareTo(MAX_CUSTOM_LOSS) > 0
+                    || customLoss.stripTrailingZeros().scale() > 2) {
+                return "The amount to deduct must be more than 0, with at most 2 decimals.";
+            }
+            if (quantity == null || quantity < 0) return "Enter how many pieces leave the stock (0 if only part of one item).";
+        } else if (quantity == null || quantity < 1) {
+            return "Enter how many pieces are bad (1 or more).";
+        }
         if (quantity > stock) return "Only " + stock + " in stock: a bad order cannot take out more than that.";
         if (reason == null) return "Choose the reason.";
         String n = note == null ? "" : note.trim();
@@ -73,9 +88,10 @@ final class BadOrderService {
         return null;
     }
 
-    /** "Stock 50 → 45 · Loss ₱100.00 (5 × ₱20.00 puhunan)" for the dialog. */
-    static String preview(int stock, int quantity, BigDecimal unitCost) {
-        String s = "Stock " + stock + " → " + (stock - quantity);
+    /** "Stock 50 → 45 · Loss ₱100.00 (5 × ₱20.00 puhunan)" for the dialog; customLoss = the amount set by hand. */
+    static String preview(int stock, int quantity, BigDecimal unitCost, BigDecimal customLoss) {
+        String s = quantity == 0 ? "Stock stays " + stock : "Stock " + stock + " → " + (stock - quantity);
+        if (customLoss != null) return s + "  ·  Loss " + Money.peso(customLoss) + " (set by hand)";
         BigDecimal loss = loss(quantity, unitCost);
         if (loss == null) return s + "  ·  no puhunan: the loss in pesos is not counted";
         return s + "  ·  Loss " + Money.peso(loss) + " (" + quantity + " × " + Money.peso(unitCost) + " puhunan)";
@@ -90,12 +106,14 @@ final class BadOrderService {
         boolean alreadySaved;
     }
 
+    /** customLoss: the amount set by hand (needs 20261028_06), or null for pieces x puhunan. */
     static Result record(int productId, int quantity, String reason, String disposition, LocalDate found,
-                         String note, UUID requestId) throws Db.Failure {
+                         String note, UUID requestId, BigDecimal customLoss) throws Db.Failure {
         String admin = Db.admin();
         try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "select * from trimax_private.record_bad_order(?, ?, ?, ?, ?, ?, ?, ?)")) {
+             PreparedStatement ps = conn.prepareStatement(customLoss == null
+                     ? "select * from trimax_private.record_bad_order(?, ?, ?, ?, ?, ?, ?, ?)"
+                     : "select * from trimax_private.record_bad_order(?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, admin);
             ps.setInt(2, productId);
             ps.setInt(3, quantity);
@@ -104,6 +122,7 @@ final class BadOrderService {
             ps.setDate(6, found == null ? null : Date.valueOf(found));
             ps.setString(7, note);
             ps.setObject(8, requestId);
+            if (customLoss != null) ps.setBigDecimal(9, customLoss);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 Result r = new Result();
@@ -115,7 +134,8 @@ final class BadOrderService {
                 return r;
             }
         } catch (SQLException e) {
-            throw Db.failure(e, "Could not record the bad order", Db.UPDATE_28_BAD_ORDERS);
+            throw Db.failure(e, "Could not record the bad order",
+                    customLoss == null ? Db.UPDATE_28_BAD_ORDERS : Db.UPDATE_28_BAD_ORDER_LOSS);
         }
     }
 
@@ -143,6 +163,8 @@ final class BadOrderService {
         long id;
         Integer productId;
         String productName, supplier, reason, disposition, note, recordedBy, voidedBy, voidReason;
+        /** PUHUNAN (pieces x puhunan) or CUSTOM (set by hand; 20261028_06). */
+        String lossSource = "PUHUNAN";
         int quantity;
         LocalDate foundOn;
         BigDecimal unitCost, loss;
@@ -150,6 +172,15 @@ final class BadOrderService {
 
         boolean undone() {
             return voidedAt != null;
+        }
+
+        boolean lossByHand() {
+            return "CUSTOM".equals(lossSource);
+        }
+
+        /** Only part of one item was bad: nothing left the stock. */
+        boolean partOfOneItem() {
+            return quantity == 0;
         }
     }
 
@@ -176,8 +207,9 @@ final class BadOrderService {
                      boolean withUndone, int limit) throws Db.Failure {
         Page p = new Page();
         String sql = "select bad_order_id, product_id, product_name, supplier, quantity, reason, disposition, found_on, "
-                + "unit_cost, loss_amount, note, recorded_by, recorded_at, voided_at, voided_by, void_reason "
-                + "from bad_orders where found_on between ? and ? "
+                + "unit_cost, loss_amount, note, recorded_by, recorded_at, voided_at, voided_by, void_reason, "
+                + "coalesce(to_jsonb(o) ->> 'loss_source', 'PUHUNAN') "
+                + "from bad_orders o where found_on between ? and ? "
                 + (reason != null ? "and reason = ? " : "")
                 + (disposition != null ? "and disposition = ? " : "")
                 + (productId != null ? "and product_id = ? " : "")
@@ -211,6 +243,7 @@ final class BadOrderService {
                     r.voidedAt = rs.getTimestamp(14);
                     r.voidedBy = rs.getString(15);
                     r.voidReason = rs.getString(16);
+                    r.lossSource = rs.getString(17);
                     all.add(r);
                 }
             }

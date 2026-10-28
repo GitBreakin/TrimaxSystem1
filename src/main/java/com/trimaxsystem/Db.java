@@ -17,6 +17,7 @@ final class Db {
     static final String UPDATE_27 = "database update 20261027_01_sales_inventory_payroll";
     static final String UPDATE_27_EXPENSES = "database update 20261027_02_expenses";
     static final String UPDATE_28_BAD_ORDERS = "database update 20261028_04_bad_orders";
+    static final String UPDATE_28_BAD_ORDER_LOSS = "database update 20261028_06_bad_order_custom_loss";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;

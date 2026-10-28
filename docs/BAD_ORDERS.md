@@ -41,6 +41,29 @@ When it is saved:
 - Net profit = gross profit − payroll − other expenses − **bad orders**.
 - The trend line, the exports and the Dashboard wording say the same.
 
+## Loss set by hand (2026-10-28, `sql/20261028_06_bad_order_custom_loss.sql`, applied to production ~23:00 with the owner's approval)
+
+Owner's request: sometimes only part of one item is bad, for example one bottle of "Sprite Mismo - 1 pack (6pcs)", worth about ₱10. The puhunan, though, is per pack.
+
+- In the Bad order dialog, **Loss to deduct** has two choices:
+  - **Puhunan × pieces** (as before)
+  - **Other amount: ₱ ___**, where the Admin types the peso loss
+- With **Other amount**, the pieces may be **0**: only part of one item was bad. The stock stays the same and only the amount is deducted from net profit, by the date found.
+- With 1 or more pieces, the stock goes down as usual, but the loss is the typed amount.
+- In the Bad orders tab:
+  - such a loss shows "by hand", and 0 pieces shows "part"
+  - the row details and the export say how the loss was set
+- Undo works for both. Undoing a "part" one puts no stock back (none was taken out).
+- Allowed amounts: more than 0, at most 2 decimals, up to ₱10,000,000. A product without puhunan can also get an amount set by hand.
+- **Database:**
+  - `bad_orders.loss_source` is `PUHUNAN` or `CUSTOM`; older rows are `PUHUNAN`.
+  - `record_bad_order(..., p_custom_loss)` takes 9 arguments. The 8-argument version stays and calls it without an amount, so a Desktop built before this update keeps working.
+  - Rollback `20261028_96_rollback_bad_order_custom_loss.sql` keeps every row.
+- **Checks (local only):**
+  - `run_tests.sh`: ALL DATABASE TESTS PASSED, with 31 new checks
+  - 92 Desktop unit tests passed
+  - end-to-end, 26 checks passed, including "Other amount" with 0 pieces and ₱10 in the dialog: the stock stays the same, and the tab shows "part" and "10.00 by hand"
+
 ## Rules
 
 - **Loss** = pieces × the product's puhunan at the moment it is recorded (kept on the bad order, so a later puhunan change does not change it).

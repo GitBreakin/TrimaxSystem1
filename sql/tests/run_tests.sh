@@ -264,4 +264,19 @@ check "select prosrc not like '%delivery_sequence%' and prosrc like '%when ''In 
 check "select has_function_privilege('authenticated', 'public.trimax_driver_list_deliveries(text)', 'execute') and not has_function_privilege('anon', 'public.trimax_driver_list_deliveries(text)', 'execute')" "after rollback the driver list keeps its access"
 psql_owner -f 20261028_05_delivery_order_nearest_hub.sql
 check "select count(*) = 2 from pg_proc where proname in ('delivery_sequence', 'hub_distance_m') and prosrc <> ''" "delivery order re-applies after rollback"
+echo "== Bad orders: loss set by hand, 0 pieces for part of one item (twice: re-runnable)"
+psql_owner -f 20261028_06_bad_order_custom_loss.sql
+psql_owner -f 20261028_06_bad_order_custom_loss.sql
+psql_su -d "$DB" -f tests/53_bad_order_custom_loss_tests.sql > "/tmp/$DB.53.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL BAD ORDER CUSTOM/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.53.log"
+grep -q '^ALL BAD ORDER CUSTOM LOSS SQL TESTS PASSED' "/tmp/$DB.53.log" || { echo "FAIL bad order custom loss tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.53.log"
+echo "== Loss set by hand: rollback, then re-apply"
+bo_rows="$(psql_owner -tAc "select count(*) from bad_orders")"
+psql_owner -f 20261028_96_rollback_bad_order_custom_loss.sql
+check "select to_regprocedure('trimax_private.record_bad_order(text,integer,integer,text,text,date,text,uuid,numeric)') is null and to_regprocedure('trimax_private.record_bad_order(text,integer,integer,text,text,date,text,uuid)') is not null" "rollback put back the 8-argument record_bad_order"
+check "select count(*) = $bo_rows and count(*) filter (where loss_source = 'CUSTOM') > 0 from bad_orders" "rollback kept every bad order ($bo_rows), also those set by hand"
+check "select (select loss_amount from trimax_private.record_bad_order('marc.admin', (select min(product_id) from products where stock > 0), 1, 'BROKEN', 'DISPOSED', null, null, gen_random_uuid())) is not distinct from (select round(capital_cost, 2) from products where product_id = (select min(product_id) from products where stock > 0))" "after rollback a bad order is pieces x puhunan again"
+psql_owner -f 20261028_06_bad_order_custom_loss.sql
+check "select to_regprocedure('trimax_private.record_bad_order(text,integer,integer,text,text,date,text,uuid,numeric)') is not null and (select count(*) = 2 from pg_proc where proname = 'record_bad_order')" "loss set by hand re-applies after rollback"
 echo "ALL DATABASE TESTS PASSED"

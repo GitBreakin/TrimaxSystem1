@@ -93,7 +93,8 @@ final class BadOrdersPanel extends JPanel {
         }
         for (JComboBox<?> c : new JComboBox<?>[]{product, reason, what, format}) c.setFont(Theme.SUBTLE);
         product.setPrototypeDisplayValue(new Item(null, "Mineral water 500 ml x24 (Aqua)"));
-        table.setToolTipText("Double-click a row for all its details (supplier, puhunan per piece, who undid it and why)");
+        table.setToolTipText("<html>Double-click a row for all its details (supplier, puhunan per piece, who undid it and why).<br>"
+                + "Loss \"by hand\" = the amount was typed in. Pieces \"part\" = only part of one item, the stock did not change.</html>");
         withUndone.setOpaque(false);
         withUndone.setFont(Theme.SUBTLE);
         withUndone.setToolTipText("Also list the bad orders that were undone (they never count in the totals)");
@@ -115,7 +116,7 @@ final class BadOrdersPanel extends JPanel {
 
         JPanel kpis = new JPanel(new GridLayout(1, 4, 10, 0));
         kpis.setOpaque(false);
-        kpis.add(kpiCard("Loss (puhunan)", kLoss, hint("lowers net profit for these dates")));
+        kpis.add(kpiCard("Loss", kLoss, hint("puhunan or amount set; lowers net profit")));
         kpis.add(kpiCard("Pieces", kUnits, hint("taken out of stock")));
         kpis.add(kpiCard("Bad orders", kCount, kCountSub));
         kpis.add(kpiCard("Without puhunan", kNoCost, kNoCostSub));
@@ -143,7 +144,7 @@ final class BadOrdersPanel extends JPanel {
         table.getColumnModel().getColumn(COL_STATUS).setCellRenderer(new UiKit.PillRenderer(
                 s -> "Counted".equals(s) ? Theme.DANGER : Theme.MUTED));
         UiKit.alignHeaders(table, COL_PIECES, COL_LOSS);
-        int[] widths = {45, 100, 200, 68, 105, 155, 118, 200, 100, 95};
+        int[] widths = {45, 100, 200, 68, 105, 155, 122, 200, 100, 95};
         int[] min = {40, 95, 140, 64, 95, 140, 112, 100, 80, 90};
         for (int i = 0; i < widths.length; i++) {
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
@@ -240,7 +241,7 @@ final class BadOrdersPanel extends JPanel {
 
     private void updateButtons() {
         BadOrderService.Record r = selected();
-        btnUndo.setEnabled(r != null && !r.undone() && r.productId != null);
+        btnUndo.setEnabled(r != null && !r.undone() && (r.productId != null || r.partOfOneItem()));
         btnExport.setEnabled(current != null);
     }
 
@@ -365,9 +366,9 @@ final class BadOrdersPanel extends JPanel {
         for (BadOrderService.Record r : p.rows) {
             rows.add(r);
             model.addRow(new Object[]{r.id, r.foundOn.toString(),
-                    r.productName + (r.productId == null ? " (deleted)" : ""), r.quantity,
+                    r.productName + (r.productId == null ? " (deleted)" : ""), r.partOfOneItem() ? "part" : r.quantity,
                     BadOrderService.reasonLabel(r.reason), BadOrderService.dispositionLabel(r.disposition),
-                    r.loss == null ? "no puhunan" : Money.plain(r.loss),
+                    r.loss == null ? "no puhunan" : Money.plain(r.loss) + (r.lossByHand() ? " by hand" : ""),
                     r.note == null ? "" : r.note, r.recordedBy == null ? "" : r.recordedBy,
                     r.undone() ? "Undone" : "Counted"});
         }
@@ -394,15 +395,18 @@ final class BadOrdersPanel extends JPanel {
     private void undo() {
         BadOrderService.Record r = selected();
         if (r == null || r.undone()) return;
-        if (r.productId == null) {
+        if (r.productId == null && !r.partOfOneItem()) {
             JOptionPane.showMessageDialog(this, "The product was deleted, so its stock cannot be put back.",
                     "Undo bad order", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         String why = JOptionPane.showInputDialog(this, "Undo bad order #" + r.id + " (" + r.productName + ", "
-                        + r.quantity + " " + BadOrderService.reasonLabel(r.reason).toLowerCase() + ", found " + r.foundOn + ")?\n\n"
-                        + "The " + r.quantity + " piece(s) go back into stock"
-                        + (r.loss == null ? "" : " and the " + Money.peso(r.loss) + " loss no longer counts") + ".\n"
+                        + (r.partOfOneItem() ? "part of one item" : String.valueOf(r.quantity)) + " "
+                        + BadOrderService.reasonLabel(r.reason).toLowerCase() + ", found " + r.foundOn + ")?\n\n"
+                        + (r.partOfOneItem() ? "The stock does not change (nothing was taken out)"
+                        : "The " + r.quantity + " piece(s) go back into stock")
+                        + (r.loss == null ? "" : (r.partOfOneItem() ? "; the " : " and the ") + Money.peso(r.loss)
+                        + " loss no longer counts") + ".\n"
                         + "It stays on record as undone, with your name and the reason.\n\nReason:",
                 "Undo bad order", JOptionPane.WARNING_MESSAGE);
         if (why == null) return;
@@ -424,7 +428,8 @@ final class BadOrdersPanel extends JPanel {
             protected void done() {
                 try {
                     int[] s = get();
-                    JOptionPane.showMessageDialog(BadOrdersPanel.this, r.productName + "\nStock " + s[0] + " → " + s[1]
+                    JOptionPane.showMessageDialog(BadOrdersPanel.this, r.productName + "\n"
+                            + (r.partOfOneItem() ? "Stock unchanged" : "Stock " + s[0] + " → " + s[1])
                             + ". Bad order #" + id + " is undone.", "Bad order undone", JOptionPane.INFORMATION_MESSAGE);
                     load();
                     if (onStockChanged != null) onStockChanged.run();
@@ -443,11 +448,14 @@ final class BadOrdersPanel extends JPanel {
         StringBuilder b = new StringBuilder();
         b.append(r.productName).append(r.productId == null ? " (deleted)" : "")
                 .append(r.supplier == null ? "" : "  ·  " + r.supplier).append('\n');
-        b.append(r.quantity).append(" piece(s), ").append(BadOrderService.reasonLabel(r.reason).toLowerCase())
+        b.append(r.partOfOneItem() ? "Part of one item (stock unchanged)" : r.quantity + " piece(s)").append(", ")
+                .append(BadOrderService.reasonLabel(r.reason).toLowerCase())
                 .append(", ").append(BadOrderService.dispositionLabel(r.disposition).toLowerCase())
                 .append(", found ").append(r.foundOn).append('\n');
-        b.append(r.loss == null ? "No puhunan: no peso loss counted" : "Loss " + Money.peso(r.loss) + " ("
-                + r.quantity + " × " + Money.peso(r.unitCost) + ")").append('\n');
+        b.append(r.loss == null ? "No puhunan: no peso loss counted"
+                : r.lossByHand() ? "Loss " + Money.peso(r.loss) + " (set by hand"
+                + (r.unitCost == null ? ")" : "; puhunan " + Money.peso(r.unitCost) + " each)")
+                : "Loss " + Money.peso(r.loss) + " (" + r.quantity + " × " + Money.peso(r.unitCost) + ")").append('\n');
         if (r.note != null) b.append("Note: ").append(r.note).append('\n');
         b.append("Recorded by ").append(r.recordedBy == null ? "?" : r.recordedBy).append(", ")
                 .append(Theme.formatWhen(r.recordedAt));
@@ -466,16 +474,18 @@ final class BadOrdersPanel extends JPanel {
         t.meta.add("Found: " + curFrom + " to " + curTo + " (Asia/Manila, both included)");
         t.meta.add("Filter: " + product.getSelectedItem() + ", " + reason.getSelectedItem() + ", " + what.getSelectedItem()
                 + (withUndone.isSelected() ? ", with undone" : ""));
-        t.meta.add("Loss: pieces x puhunan at the time it was recorded; it lowers net profit by the date found");
+        t.meta.add("Loss: pieces x puhunan at the time it was recorded, or the amount set by hand; it lowers net profit by the date found");
+        t.meta.add("Pieces 0: only part of one item was bad (the stock did not change)");
         t.meta.add("Total counted: " + p.all.count + " bad orders, " + p.all.units + " pieces, loss " + plain(p.all.loss)
                 + (p.all.noCost > 0 ? " (" + p.all.noCost + " without puhunan, no loss counted)" : ""));
         t.header = List.of("#", "Date found", "Product", "Supplier", "Reason", "What happened", "Note", "Recorded by",
-                "Status", "Pieces", "Puhunan per piece", "Loss");
-        t.firstNumericCol = 9;
+                "Status", "Loss set by", "Pieces", "Puhunan per piece", "Loss");
+        t.firstNumericCol = 10;
         for (BadOrderService.Record r : p.rows) {
             t.rows.add(List.of(String.valueOf(r.id), r.foundOn.toString(), r.productName, nz(r.supplier),
                     BadOrderService.reasonLabel(r.reason), BadOrderService.dispositionLabel(r.disposition), nz(r.note),
-                    nz(r.recordedBy), r.undone() ? "Undone: " + r.voidReason : "Counted", String.valueOf(r.quantity),
+                    nz(r.recordedBy), r.undone() ? "Undone: " + r.voidReason : "Counted",
+                    r.lossByHand() ? "Hand" : "Puhunan x pieces", String.valueOf(r.quantity),
                     plain(r.unitCost), plain(r.loss)));
         }
         t.footer.add(List.of("Reason", "Bad orders", "Pieces", "Loss"));
