@@ -30,7 +30,7 @@ public class MainFrame extends JFrame {
             {"Payroll", "Payroll", "Pay per employee and pay period; paid and unpaid (Admin only)"},
             {"Expenses", "Other Expenses", "Electricity, rent, fuel and other costs; they lower net profit (Admin only)"},
             {"Customers", "Customers", "Customer records, photos, assigned agents and locations"},
-            {"Analytics & Reports", "Analytics & Reports", "Booking volume, completion and cancellation, with CSV, Excel and PDF export"},
+            {"Analytics & Reports", "Analytics & Reports", "Booking reports, and which products sell, stall or need restocking"},
             {"Notifications", "Notifications", "Operational alerts and announcements"},
             {"Audit Logs", "Audit Logs", "Who changed what, and when (read-only)"},
             {"System Settings", "System Settings", "Your profile, connection health and environment"},
@@ -45,6 +45,7 @@ public class MainFrame extends JFrame {
     private NotificationsPanel notificationsPanel;
     private AttendancePanel attendancePanel;
     private ProfitPanel profitPanel;
+    private InventoryPanel inventoryPanel;
     private final NavButton[] navButtons = new NavButton[PAGES.length];
 
     /**
@@ -78,7 +79,8 @@ public class MainFrame extends JFrame {
         mainContentPanel.add(dashboard, PAGES[0][0]);
         mainContentPanel.add(profitPanel, PAGES[PROFIT_PAGE][0]);
         mainContentPanel.add(new SalesPanel(), PAGES[2][0]);
-        mainContentPanel.add(new InventoryPanel(), PAGES[3][0]);
+        inventoryPanel = new InventoryPanel();
+        mainContentPanel.add(inventoryPanel, PAGES[3][0]);
         mainContentPanel.add(new BookingsPanel(), PAGES[4][0]);
         mainContentPanel.add(buildLiveGpsPage(), PAGES[5][0]);
         mainContentPanel.add(new ManageVehiclesPanel(), PAGES[6][0]);
@@ -88,8 +90,9 @@ public class MainFrame extends JFrame {
         mainContentPanel.add(new PayrollPanel(), PAGES[9][0]);
         mainContentPanel.add(new ExpensesPanel(), PAGES[10][0]);
         mainContentPanel.add(new ClientsPanel(), PAGES[11][0]);
-        mainContentPanel.add(new AnalyticsPanel(), PAGES[12][0]);
+        mainContentPanel.add(buildAnalyticsPage(), PAGES[12][0]);
         notificationsPanel = new NotificationsPanel(this::refreshBell);
+        notificationsPanel.setOpenProduct(this::openProduct);
         mainContentPanel.add(notificationsPanel, PAGES[NOTIFICATIONS_PAGE][0]);
         mainContentPanel.add(new AuditLogsPanel(), PAGES[14][0]);
         mainContentPanel.add(new SettingsPanel(), PAGES[15][0]);
@@ -109,6 +112,41 @@ public class MainFrame extends JFrame {
      * Live GPS Monitoring page: read-only maps for the last reported vehicle and agent positions, and the
      * recorded location history of one agent or driver (Admins only).
      */
+    private JComponent buildAnalyticsPage() {
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Booking reports", new AnalyticsPanel());
+        tabs.addTab("Sales & Inventory Intelligence", new InsightsPanel(this::openProduct, this::refreshBell));
+        return tabs;
+    }
+
+    /** Opens a product in Inventory (from Analytics or a notification). */
+    private void openProduct(int productId) {
+        showPage(3);
+        inventoryPanel.selectProduct(productId);
+    }
+
+    /**
+     * Checks for new inventory alerts in the background (the server has no scheduler): when the window
+     * opens and every 15 minutes while it is open. Failures are ignored; the bell shows what exists.
+     */
+    private void refreshInventoryAlerts() {
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                return InsightService.refreshAlerts();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    if (get() > 0) refreshBell();
+                } catch (Exception ignored) {
+                    // not set up yet, offline, or not an admin session: nothing to show
+                }
+            }
+        }.execute();
+    }
+
     private JComponent buildLiveGpsPage() {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Vehicle map", new LiveGpsPanel());
@@ -234,6 +272,8 @@ public class MainFrame extends JFrame {
     private static final int NOTIFICATIONS_PAGE = 13;
     /** How often the bell asks the database for the unread count (no realtime connection on the Desktop). */
     private static final int BELL_POLL_MS = 30_000;
+    /** How often the inventory alerts are re-checked while the app is open. */
+    private static final int ALERT_CHECK_MS = 15 * 60_000;
     private int lastUnread = -1;
     private int currentPage = 0;
 
@@ -281,10 +321,17 @@ public class MainFrame extends JFrame {
         });
         bellPoll.setRepeats(true);
         bellPoll.start();
+        Timer alertCheck = new Timer(ALERT_CHECK_MS, e -> {
+            if (isShowing()) refreshInventoryAlerts();
+        });
+        alertCheck.setInitialDelay(5_000);   // shortly after sign-in, then every 15 minutes
+        alertCheck.setRepeats(true);
+        alertCheck.start();
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosed(java.awt.event.WindowEvent e) {
                 bellPoll.stop();   // signed out or closed: stop asking
+                alertCheck.stop();
             }
         });
 

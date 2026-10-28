@@ -21,6 +21,7 @@ public class NotificationsPanel extends JPanel {
     private final JButton markAll = UiKit.secondaryButton("Mark all as read");
     private final JButton resolve = UiKit.secondaryButton("Resolve alert...");
     private final JButton openBooking = UiKit.primaryButton("Open booking");
+    private java.util.function.IntConsumer openProduct;
     private final JLabel info = new JLabel(" ");
     private final StatePanel state = new StatePanel();
     private final CardLayout cards = new CardLayout();
@@ -64,14 +65,15 @@ public class NotificationsPanel extends JPanel {
         markAll.addActionListener(e -> markAllRead());
         resolve.addActionListener(e -> resolveSelected());
         openBooking.addActionListener(e -> openSelectedBooking());
-        openBooking.setToolTipText("Opens the booking this notification is about");
+        openBooking.setToolTipText("Opens the booking or product this notification is about");
         // Clicking a "New booking" notification opens that booking (and marks the notification read).
         table.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
                 if (e.getClickCount() != 1 || !SwingUtilities.isLeftMouseButton(e)) return;
                 int r = table.rowAtPoint(e.getPoint());
-                if (r >= 0 && r < shown.size() && shown.get(r).bookingId() != null) {
+                if (r >= 0 && r < shown.size() && (shown.get(r).bookingId() != null
+                        || (shown.get(r).productId() != null && openProduct != null))) {
                     table.setRowSelectionInterval(r, r);
                     openSelectedBooking();
                 }
@@ -132,7 +134,9 @@ public class NotificationsPanel extends JPanel {
         NotificationService.Item it = selected();
         markOne.setEnabled(it != null && it.unread());
         markAll.setEnabled(unread > 0);
-        openBooking.setEnabled(it != null && it.bookingId() != null);
+        boolean product = it != null && it.productId() != null && openProduct != null;
+        openBooking.setText(product ? "Open product" : "Open booking");
+        openBooking.setEnabled(it != null && (it.bookingId() != null || product));
         boolean canResolve = resolutionAvailable && it != null && it.isAlert() && !it.resolved();
         resolve.setEnabled(canResolve);
         resolve.setToolTipText(!resolutionAvailable
@@ -301,9 +305,20 @@ public class NotificationsPanel extends JPanel {
      * Opens the booking of the selected notification. An unread notification is marked read first (the same
      * statement as "Mark selected as read"), so the bell count drops once it has been looked at.
      */
+    /** Opens products in Inventory (set by the main window). */
+    public void setOpenProduct(java.util.function.IntConsumer openProduct) {
+        this.openProduct = openProduct;
+    }
+
     private void openSelectedBooking() {
         NotificationService.Item it = selected();
-        if (it == null || it.bookingId() == null || busy) return;
+        if (it == null || busy) return;
+        if (it.productId() != null && openProduct != null) {
+            if (it.unread()) run(it.id);   // mark read, as for bookings
+            openProduct.accept(it.productId());
+            return;
+        }
+        if (it.bookingId() == null) return;
         int bookingId = it.bookingId();
         if (it.unread()) {
             new SwingWorker<Integer, Void>() {

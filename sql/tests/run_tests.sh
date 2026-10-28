@@ -206,4 +206,26 @@ check "select count(*) = $nb_rows from admin_notifications where category = 'New
 psql_owner -f 20261028_01_location_history_and_booking_notifications.sql
 check "select count(*) = 4 from pg_proc where proname in ('location_history_for', 'purge_location_history', 'bookings_notify_new', 'distance_m')" "location history re-applies after rollback"
 check "select count(*) = $hist_rows from trimax_private.location_history" "re-apply continues from the same history"
+echo "== Suppliers and Sales & Inventory Intelligence (each twice: re-runnable)"
+psql_owner -f 20261028_02_suppliers.sql
+psql_owner -f 20261028_02_suppliers.sql
+psql_owner -f 20261028_03_sales_inventory_intelligence.sql
+psql_owner -f 20261028_03_sales_inventory_intelligence.sql
+psql_su -d "$DB" -f tests/50_suppliers_and_intelligence_tests.sql > "/tmp/$DB.50.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL SUPPLIER AND INTELLIGENCE/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.50.log"
+grep -q '^ALL SUPPLIER AND INTELLIGENCE SQL TESTS PASSED' "/tmp/$DB.50.log" || { echo "FAIL supplier / intelligence tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.50.log"
+echo "== Suppliers and intelligence rollback, then re-apply"
+sup_rows="$(psql_owner -tAc "select count(*) from suppliers")"
+alert_rows="$(psql_owner -tAc "select count(*) from admin_notifications where category = 'Inventory insight'")"
+psql_owner -f 20261028_93_rollback_sales_inventory_intelligence.sql
+psql_owner -f 20261028_92_rollback_suppliers.sql
+check "select count(*) = 0 from pg_proc where proname in ('save_supplier', 'products_add_supplier', 'product_insights', 'refresh_inventory_alerts', 'sold_lines')" "rollback removed the supplier and intelligence functions"
+check "select count(*) = $sup_rows from suppliers" "rollback kept the supplier list ($sup_rows)"
+check "select count(*) = $alert_rows from admin_notifications where category = 'Inventory insight'" "rollback kept the inventory alerts ($alert_rows)"
+psql_owner -c "update products set supplier = 'After Rollback Supplier' where product_id = (select min(product_id) from products)" >/dev/null && echo "PASS products save normally after the rollback"
+psql_owner -f 20261028_02_suppliers.sql
+psql_owner -f 20261028_03_sales_inventory_intelligence.sql
+check "select count(*) = 5 from pg_proc where proname in ('save_supplier', 'products_add_supplier', 'product_insights', 'refresh_inventory_alerts', 'sold_lines')" "suppliers and intelligence re-apply after rollback"
+check "select exists (select 1 from suppliers where name = 'After Rollback Supplier')" "re-apply adds suppliers used while it was rolled back"
 echo "ALL DATABASE TESTS PASSED"

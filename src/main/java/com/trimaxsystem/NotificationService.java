@@ -25,6 +25,8 @@ public final class NotificationService {
     private static final String TABLE_MISSING = "42P01";
     /** Category of the notification the database adds when an agent's booking is saved (sql/20261028_01). */
     public static final String NEW_BOOKING = "New booking";
+    /** Category of Sales & Inventory Intelligence alerts (sql/20261028_03). */
+    public static final String INVENTORY_INSIGHT = "Inventory insight";
     private static final int LIMIT = 200;
     public static final int MAX_NOTE = 1000;
 
@@ -53,6 +55,7 @@ public final class NotificationService {
 
         public String related() {
             if (bookingId() != null) return "Booking #" + relatedId;
+            if (productId() != null) return "Product #" + relatedId;
             return relatedType == null || relatedId == null ? "" : relatedType + " " + relatedId;
         }
 
@@ -66,9 +69,21 @@ public final class NotificationService {
             }
         }
 
-        /** What the Kind column says: "Booking" for a new booking from an agent, else the stored kind. */
+        /** The product this notification is about (an inventory alert, sql/20261028_03), or null. */
+        public Integer productId() {
+            if (!"product".equals(relatedType) || relatedId == null) return null;
+            try {
+                return Integer.valueOf(relatedId.trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        /** What the Kind column says: "Booking" / "Inventory" for those notices, else the stored kind. */
         public String kindLabel() {
-            return NEW_BOOKING.equals(category) ? "Booking" : kind;
+            if (NEW_BOOKING.equals(category)) return "Booking";
+            if (INVENTORY_INSIGHT.equals(category)) return "Inventory";
+            return kind;
         }
 
         /** Short state for the list: Unread / Acknowledged / Resolved (alerts), Unread / Read (announcements). */
