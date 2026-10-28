@@ -137,9 +137,6 @@ Also in this change: the **Refresh** button above the product list (Lance's chan
   - The supplier filter works.
 - Not checked on production data or on the Android app (no change there).
 
-## Needs the owner's approval
+## Production
 
-Apply `20261028_02_suppliers.sql` and `20261028_03_sales_inventory_intelligence.sql` to production. Until then:
-- the Intelligence tab says "not set up yet";
-- the Insight column is empty;
-- the supplier drop-down lists the products' suppliers, and a new one is saved with the product.
+`20261028_02_suppliers.sql` and `20261028_03_sales_inventory_intelligence.sql` were applied on 2026-10-28 (about 22:20 Manila) with the owner's approval. The checks are in docs/DATABASE_BASELINE.md.

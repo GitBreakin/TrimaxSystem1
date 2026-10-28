@@ -26,7 +26,8 @@
 -- ORDER: after 20261027_02 (expenses). Re-runnable. Rollback: 20261028_94_rollback_bad_orders.sql.
 -- If 20261027_02 is ever run again after this file, run this file again too (02 re-creates the reports
 -- without the bad-order columns).
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 22:20 Asia/Manila) with the owner's approval, as migration
+-- 20261028_04_bad_orders (one transaction).
 -- =====================================================================================================
 
 begin;

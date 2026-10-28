@@ -51,7 +51,7 @@ When it is saved:
 - **Retries:** each dialog has one request id, so a double click or a retry after a lost connection records it only once.
 - **Limits:** a bad order cannot take out more than the stock. A bad order of a deleted product cannot be undone (there is no stock to put back); its record and loss are kept.
 
-## Database (`sql/20261028_04_bad_orders.sql`, NOT applied to production)
+## Database (`sql/20261028_04_bad_orders.sql`, applied to production 2026-10-28 with the owner's approval)
 
 - **Stock history:** `inventory_movements` gains kinds `BAD_ORDER` and `BAD_ORDER_VOIDED` (the check constraint is replaced by the same list plus these two).
 - **`public.bad_orders`:**
@@ -114,6 +114,6 @@ Before the update is applied, the Desktop says so:
   - the Sales & Profit card and net profit
 - Not checked on production data or on the Android app (no change there).
 
-## Needs the owner's approval
+## Production
 
-Apply `20261028_04_bad_orders.sql` to production (after `20261028_02` and `20261028_03`, which are still waiting too).
+Applied on 2026-10-28 (about 22:20 Manila) with the owner's approval, after `20261028_02` and `20261028_03`. The checks before and after are in docs/DATABASE_BASELINE.md.

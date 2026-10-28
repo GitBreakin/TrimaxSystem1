@@ -15,7 +15,8 @@
 --
 -- ORDER: after 20261027_04 (independent of 20261028_01). Re-runnable.
 -- Rollback: 20261028_92_rollback_suppliers.sql (keeps the list).
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 22:20 Asia/Manila) with the owner's approval, as migration
+-- 20261028_02_suppliers (one transaction).
 -- =====================================================================================================
 
 begin;
