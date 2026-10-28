@@ -8,8 +8,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.swing.*;
@@ -32,7 +34,11 @@ import javax.swing.table.DefaultTableModel;
 public class InventoryPanel extends JPanel {
 
     private static final int COL_PICTURE = 0, COL_ID = 1, COL_NAME = 2, COL_SUPPLIER = 3, COL_COST = 4,
-            COL_MARKUP = 5, COL_PRICE = 6, COL_STOCK = 7, COL_STATUS = 8;
+            COL_MARKUP = 5, COL_PRICE = 6, COL_STOCK = 7, COL_STATUS = 8, COL_INSIGHT = 9;
+    /** Sales & Inventory Intelligence in the list looks at the last 30 days (Analytics has other periods). */
+    private static final int INSIGHT_DAYS = 30;
+    private static final String CHOOSE_SUPPLIER = "Choose a supplier...";
+    private static final String ALL_SUPPLIERS = "All suppliers";
     private static final int THUMB = 36, PREVIEW = 96;
     private static final String[] MARKUP_TYPES = {"₱ amount", "% of puhunan"};
 
@@ -40,7 +46,14 @@ public class InventoryPanel extends JPanel {
     private final JTable table;
 
     private final JTextField txtProduct = new JTextField(16);
-    private final JTextField txtSupplier = new JTextField(16);
+    // Supplier: picked from the list (sql/20261028_02); "+ Add supplier" puts a new name in the list.
+    private final JComboBox<String> cmbSupplier = new JComboBox<>();
+    private final JButton btnAddSupplier = UiKit.secondaryButton("+ Add");
+    private final JComboBox<String> cmbSupplierFilter = new JComboBox<>();
+    private List<String> supplierNames = new ArrayList<>();
+    private boolean fillingSuppliers;
+    // Sales & Inventory Intelligence flags of the last INSIGHT_DAYS days (sql/20261028_03), by product id
+    private Map<Integer, InsightService.Item> insights = new HashMap<>();
     private final JTextField txtCost = new JTextField(8);
     private final JComboBox<String> cmbMarkupType = new JComboBox<>(MARKUP_TYPES);
     private final JTextField txtMarkup = new JTextField(6);
@@ -102,7 +115,7 @@ public class InventoryPanel extends JPanel {
         controls.add(buildSearchCard());
         productsTab.add(controls, BorderLayout.NORTH);
 
-        String[] columnNames = {"Picture", "ID", "Product", "Supplier", "Puhunan", "Patong", "Price", "Stock", "Status"};
+        String[] columnNames = {"Picture", "ID", "Product", "Supplier", "Puhunan", "Patong", "Price", "Stock", "Status", "Insight (30 days)"};
         inventoryTable = new DefaultTableModel(null, columnNames) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -113,7 +126,7 @@ public class InventoryPanel extends JPanel {
         UiKit.styleTable(table, 44);
         table.setAutoCreateRowSorter(true);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
-        int[] widths = {60, 50, 220, 160, 90, 80, 90, 70, 110};
+        int[] widths = {60, 50, 200, 140, 85, 75, 85, 60, 95, 190};
         for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getColumnModel().getColumn(COL_PICTURE).setMaxWidth(70);
         table.getColumnModel().getColumn(COL_ID).setMaxWidth(70);
@@ -124,6 +137,18 @@ public class InventoryPanel extends JPanel {
         table.getColumnModel().getColumn(COL_ID).setCellRenderer(new UiKit.CellRenderer(SwingConstants.LEFT, false, true));
         table.getColumnModel().getColumn(COL_PICTURE).setCellRenderer(new ThumbRenderer());
         table.getColumnModel().getColumn(COL_STATUS).setCellRenderer(new UiKit.PillRenderer(InventoryPanel::statusColor));
+        // Insight: the analysis label(s), coloured by the most important one; the reasons show on hover.
+        UiKit.PillRenderer insightPill = new UiKit.PillRenderer(InventoryPanel::insightColor);
+        table.getColumnModel().getColumn(COL_INSIGHT).setCellRenderer(new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable t, Object v, boolean sel, boolean focus, int row, int col) {
+                JComponent c = (JComponent) insightPill.getTableCellRendererComponent(t, v, sel, focus, row, col);
+                InsightService.Item it = insightAt(row);
+                c.setToolTipText(it == null ? null : "<html>" + esc(it.allReasons()).replace("\n", "<br>")
+                        + "<br><br><b>Suggested:</b> " + esc(it.allActions()) + "</html>");
+                return c;
+            }
+        });
         UiKit.alignHeaders(table, COL_COST, COL_MARKUP, COL_PRICE, COL_STOCK);
 
         table.getSelectionModel().addListSelectionListener(e -> {
@@ -148,7 +173,13 @@ public class InventoryPanel extends JPanel {
         tableHeading.add(UiKit.cardHeading("Products", null), BorderLayout.WEST);
         lblCount.setFont(Theme.SMALL);
         lblCount.setForeground(Theme.MUTED);
-        tableHeading.add(lblCount, BorderLayout.EAST);
+        JPanel tableActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        tableActions.setOpaque(false);
+        tableActions.add(lblCount);
+        JButton btnRefresh = UiKit.secondaryButton("Refresh");
+        btnRefresh.addActionListener(e -> refreshInventory());
+        tableActions.add(btnRefresh);
+        tableHeading.add(tableActions, BorderLayout.EAST);
         tableCard.add(tableHeading, BorderLayout.NORTH);
         JScrollPane tableScroll = UiKit.tableScroll(table);
         UiKit.passWheelToPageAtEnds(tableScroll);
@@ -166,6 +197,29 @@ public class InventoryPanel extends JPanel {
         loadInventory("", "All stock levels");
     }
 
+    /** Colour of the most important insight label in a cell ("Fast-Moving · Critical / Low Stock" -> its first). */
+    private static Color insightColor(String text) {
+        String first = text.split(" \u00B7 ")[0];
+        for (Map.Entry<String, String> e : InsightRules.LABELS.entrySet()) {
+            if (e.getValue().equals(first)) return InsightRules.color(e.getKey());
+        }
+        return Theme.MUTED;
+    }
+
+    private InsightService.Item insightAt(int viewRow) {
+        if (viewRow < 0 || viewRow >= table.getRowCount()) return null;
+        Object id = inventoryTable.getValueAt(table.convertRowIndexToModel(viewRow), COL_ID);
+        try {
+            return insights.get(Integer.valueOf(String.valueOf(id)));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String esc(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private static Color statusColor(String status) {
         switch (status) {
             case "High": return Theme.OK;
@@ -180,9 +234,13 @@ public class InventoryPanel extends JPanel {
     // ---------- FORM ----------
 
     private JPanel buildProductCard() {
-        for (JTextField f : new JTextField[]{txtProduct, txtSupplier, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
             UiKit.styleField(f);
         }
+        cmbSupplier.setFont(Theme.SUBTLE);
+        cmbSupplier.setToolTipText("Pick the supplier. Not in the list? Use + Add.");
+        btnAddSupplier.setToolTipText("Add a new supplier to the list");
+        btnAddSupplier.addActionListener(e -> addSupplier());
         UiKit.placeholder(txtCost, "e.g. 45.00");
         UiKit.placeholder(txtMarkup, "e.g. 12");
         UiKit.placeholder(txtMinMarkup, "0.00");
@@ -231,7 +289,11 @@ public class InventoryPanel extends JPanel {
         g.gridwidth = 2;
         fields.add(UiKit.group("Product", txtProduct), g);
         g.gridx = 2;
-        fields.add(UiKit.group("Supplier", txtSupplier), g);
+        JPanel supplierBox = new JPanel(new BorderLayout(6, 0));
+        supplierBox.setOpaque(false);
+        supplierBox.add(cmbSupplier, BorderLayout.CENTER);
+        supplierBox.add(btnAddSupplier, BorderLayout.EAST);
+        fields.add(UiKit.group("Supplier", supplierBox), g);
 
         g.gridy = 1;
         g.gridwidth = 1;
@@ -318,7 +380,7 @@ public class InventoryPanel extends JPanel {
     private void fillForm(InventoryService.Product p) {
         if (p == null) return;
         txtProduct.setText(p.name);
-        txtSupplier.setText(p.supplier == null ? "" : p.supplier);
+        selectSupplier(p.supplier);
         txtCost.setText(p.cost == null ? "" : p.cost.toPlainString());
         cmbMarkupType.setSelectedIndex("PERCENT".equals(p.markupType) ? 1 : 0);
         txtMarkup.setText(p.markupValue == null ? "" : p.markupValue.stripTrailingZeros().toPlainString());
@@ -749,6 +811,11 @@ public class InventoryPanel extends JPanel {
         txtSearch.addActionListener(e -> searchProducts());
         cmbFilter.setFont(Theme.SUBTLE);
         cmbFilter.addActionListener(e -> searchProducts());
+        cmbSupplierFilter.setFont(Theme.SUBTLE);
+        cmbSupplierFilter.addItem(ALL_SUPPLIERS);
+        cmbSupplierFilter.addActionListener(e -> {
+            if (!fillingSuppliers) searchProducts();
+        });
 
         JButton btnSearch = UiKit.primaryButton("Search");
         btnSearch.addActionListener(e -> searchProducts());
@@ -765,6 +832,8 @@ public class InventoryPanel extends JPanel {
         c.gridx = 1;
         c.weightx = 0;
         inputs.add(UiKit.group("Stock status", cmbFilter), c);
+        c.gridx = 2;
+        inputs.add(UiKit.group("Supplier", cmbSupplierFilter), c);
         card.add(inputs, BorderLayout.CENTER);
         JPanel button = new JPanel(new BorderLayout());
         button.setOpaque(false);
@@ -783,9 +852,10 @@ public class InventoryPanel extends JPanel {
 
     /** Blanks the form and deselects the table row. */
     private void clearFields() {
-        for (JTextField f : new JTextField[]{txtProduct, txtSupplier, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
+        for (JTextField f : new JTextField[]{txtProduct, txtCost, txtMarkup, txtPrice, txtMinMarkup, txtStock}) {
             f.setText("");
         }
+        if (cmbSupplier.getItemCount() > 0) cmbSupplier.setSelectedIndex(0);
         cmbMarkupType.setSelectedIndex(0);
         chkAgentDiscount.setSelected(false);
         selectedProductId = null;
@@ -801,6 +871,126 @@ public class InventoryPanel extends JPanel {
     /** Reload everything (keeps the older loadInventory() calls working). */
     public void loadInventory() {
         loadInventory(txtSearch.getText().trim(), (String) cmbFilter.getSelectedItem());
+    }
+
+    /** The Refresh button above the list: reloads the products and, if it is open, the stock history. */
+    private void refreshInventory() {
+        loadInventory();
+        historyPanel.reloadIfShown();
+    }
+
+    /**
+     * Opens the Products tab with this product selected (from Analytics or a notification). Filters that
+     * would hide it are cleared first.
+     */
+    public void selectProduct(int productId) {
+        tabs.setSelectedIndex(0);
+        String id = String.valueOf(productId);
+        if (!products.containsKey(id)) {
+            txtSearch.setText("");
+            cmbFilter.setSelectedIndex(0);
+            if (cmbSupplierFilter.getItemCount() > 0) cmbSupplierFilter.setSelectedIndex(0);
+            loadInventory("", "All stock levels");
+        }
+        if (products.containsKey(id)) {
+            selectRow(id);
+        } else {
+            JOptionPane.showMessageDialog(this, "Product #" + productId + " is no longer in the inventory.",
+                    "Inventory", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    // ---------- SUPPLIERS ----------
+
+    /** Fills both supplier lists from the database, keeping what is selected. */
+    private void loadSuppliers() {
+        try {
+            supplierNames = SupplierService.list();
+        } catch (SQLException e) {
+            // keep the previous list; the products still load
+        }
+        String formPick = selectedSupplier();
+        String filterPick = (String) cmbSupplierFilter.getSelectedItem();
+        fillingSuppliers = true;
+        try {
+            cmbSupplier.removeAllItems();
+            cmbSupplier.addItem(CHOOSE_SUPPLIER);
+            for (String n : supplierNames) cmbSupplier.addItem(n);
+            cmbSupplierFilter.removeAllItems();
+            cmbSupplierFilter.addItem(ALL_SUPPLIERS);
+            for (String n : supplierNames) cmbSupplierFilter.addItem(n);
+            if (!formPick.isEmpty()) selectSupplier(formPick);
+            String f = filterPick == null ? null : SupplierService.match(supplierNames, filterPick);
+            cmbSupplierFilter.setSelectedItem(f == null ? ALL_SUPPLIERS : f);
+        } finally {
+            fillingSuppliers = false;
+        }
+    }
+
+    /** Selects the supplier in the form list (adding the name if the list does not have it yet). */
+    private void selectSupplier(String name) {
+        if (name == null || name.isBlank()) {
+            if (cmbSupplier.getItemCount() > 0) cmbSupplier.setSelectedIndex(0);
+            return;
+        }
+        String inList = SupplierService.match(supplierNames, name);
+        if (inList == null) {
+            inList = SupplierService.tidy(name);
+            supplierNames.add(inList);
+            cmbSupplier.addItem(inList);
+        }
+        cmbSupplier.setSelectedItem(inList);
+    }
+
+    /** The supplier chosen in the form, or "" when none. */
+    private String selectedSupplier() {
+        Object v = cmbSupplier.getSelectedItem();
+        return v == null || CHOOSE_SUPPLIER.equals(v) ? "" : v.toString().trim();
+    }
+
+    private void addSupplier() {
+        String typed = JOptionPane.showInputDialog(this, "Supplier name:", "Add supplier", JOptionPane.PLAIN_MESSAGE);
+        if (typed == null) return;
+        String name = SupplierService.tidy(typed);
+        String bad = SupplierService.check(name);
+        if (bad != null) {
+            JOptionPane.showMessageDialog(this, bad, "Add supplier", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String existing = SupplierService.match(supplierNames, name);
+        if (existing != null) {
+            cmbSupplier.setSelectedItem(existing);
+            JOptionPane.showMessageDialog(this, "\"" + existing + "\" is already in the list. It is now selected.",
+                    "Add supplier", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        try {
+            String saved = SupplierService.add(name);
+            if (saved == null) {
+                JOptionPane.showMessageDialog(this, "The supplier list is not set up on the server yet (database update "
+                        + "20261028_02). \"" + name + "\" will be saved with this product.", "Add supplier",
+                        JOptionPane.INFORMATION_MESSAGE);
+                saved = name;
+            }
+            loadSuppliers();
+            selectSupplier(saved);
+        } catch (AuthService.AuthException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Not allowed", JOptionPane.ERROR_MESSAGE);
+        } catch (IllegalArgumentException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Add supplier", JOptionPane.WARNING_MESSAGE);
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this, Db.message(ex, "The supplier was not added"), "Add supplier",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** Analysis flags for the Insight column; none when the server does not have the update yet. */
+    private void loadInsights() {
+        try {
+            insights = InsightService.latest(INSIGHT_DAYS);
+        } catch (SQLException e) {
+            insights = new HashMap<>();
+        }
     }
 
     private void searchProducts() {
@@ -819,11 +1009,19 @@ public class InventoryPanel extends JPanel {
             picturesSupported = catalog.pictures;
             pricingSupported = catalog.pricing && Db.salesReady();
             itemDiscountsSupported = catalog.itemDiscounts;
+            loadSuppliers();
+            loadInsights();
+            String supplierFilter = (String) cmbSupplierFilter.getSelectedItem();
             for (InventoryService.Product p : catalog.products) {
                 String status = getStatus(p.stock);
                 if (statusFilter != null && !"All stock levels".equals(statusFilter) && !status.equals(statusFilter)) {
                     continue;
                 }
+                if (supplierFilter != null && !ALL_SUPPLIERS.equals(supplierFilter)
+                        && !SupplierService.key(supplierFilter).equals(SupplierService.key(p.supplier))) {
+                    continue;
+                }
+                InsightService.Item insight = insights.get(p.id);
                 String id = String.valueOf(p.id);
                 products.put(id, p);
                 if (p.imagePath != null) imagePaths.put(id, p.imagePath);
@@ -836,7 +1034,8 @@ public class InventoryPanel extends JPanel {
                         p.markupText(),
                         Money.plain(p.price),
                         String.valueOf(p.stock),
-                        status
+                        status,
+                        insight == null ? "" : InsightRules.labels(insight.flags)
                 });
             }
             long noCost = catalog.products.stream().filter(p -> p.cost == null).count();
@@ -870,10 +1069,10 @@ public class InventoryPanel extends JPanel {
             return;
         }
         String name = txtProduct.getText().trim();
-        String supplier = txtSupplier.getText().trim();
+        String supplier = selectedSupplier();
         if (name.isEmpty() || supplier.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Product and Supplier are required.", "Missing data",
-                    JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, name.isEmpty() ? "Enter the product name." : "Choose the supplier "
+                            + "(or add it with + Add).", "Missing data", JOptionPane.WARNING_MESSAGE);
             return;
         }
         if (!pricingSupported) {
