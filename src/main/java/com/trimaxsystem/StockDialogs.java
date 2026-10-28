@@ -344,6 +344,26 @@ final class StockDialogs {
         found.setText(today.toString());
         found.setToolTipText("YYYY-MM-DD: the day the bad items were found (Asia/Manila)");
         JTextField note = new JTextField(26);
+        // Loss to deduct: pieces x puhunan, or an amount set by hand (then 0 pieces = part of one item)
+        JRadioButton lossPuhunan = new JRadioButton("Puhunan \u00D7 pieces", true);
+        JRadioButton lossHand = new JRadioButton("Other amount:");
+        ButtonGroup lossGroup = new ButtonGroup();
+        lossGroup.add(lossPuhunan);
+        lossGroup.add(lossHand);
+        for (JRadioButton b : new JRadioButton[]{lossPuhunan, lossHand}) {
+            b.setOpaque(false);
+            b.setFont(Theme.SUBTLE);
+        }
+        JTextField amount = new JTextField(7);
+        UiKit.styleField(amount);
+        UiKit.placeholder(amount, "\u20B1 e.g. 10");
+        amount.setToolTipText("The peso loss to deduct from net profit, for example P10 for one broken bottle of a pack");
+        final String partText = "<html><div style='width:440px'>0 pieces = only part of one item is bad (for example one bottle "
+                + "of a 6-pack): the stock stays the same, only the amount is deducted.</div></html>";
+        JLabel partHint = new JLabel(partText);
+        partHint.setFont(Theme.SMALL);
+        partHint.setForeground(Theme.MUTED);
+        partHint.setPreferredSize(partHint.getPreferredSize());   // keeps its room while it is empty
         JLabel now = new JLabel(" ");
         JLabel result = new JLabel(" ");
         JLabel error = new JLabel(" ");
@@ -370,18 +390,35 @@ final class StockDialogs {
                     + (cur.cost == null ? "none" : Money.peso(cur.cost)) + "</b>"
                     + (cur.supplier == null || cur.supplier.isBlank() ? "" : " &nbsp;·&nbsp; Supplier: <b>" + esc(cur.supplier) + "</b>")
                     + "</html>");
+            boolean hand = lossHand.isSelected();
+            amount.setEnabled(hand);
+            partHint.setText(hand ? partText : "");
             try {
-                int q = qty.getText().isBlank() ? 0 : Money.parseInt(qty.getText(), "quantity", 1, 1_000_000);
-                result.setText(q == 0 ? " " : BadOrderService.preview(cur.stock, q, cur.cost));
-                result.setForeground(q > cur.stock ? Theme.DANGER : Theme.TEXT);
-                if (q > cur.stock) error.setText("Only " + cur.stock + " in stock.");
+                Integer q = qty.getText().isBlank() ? null : Money.parseInt(qty.getText(), "quantity", hand ? 0 : 1, 1_000_000);
+                lossPuhunan.setText(cur.cost == null ? "Puhunan \u00D7 pieces (no puhunan: no loss)"
+                        : "Puhunan \u00D7 pieces" + (q == null || q == 0 ? " (" + Money.peso(cur.cost) + " each)"
+                        : " (" + Money.peso(BadOrderService.loss(q, cur.cost)) + ")"));
+                BigDecimal custom = hand ? Money.parse(amount.getText(), "amount to deduct", true) : null;
+                if (q == null || (hand && custom == null)) {
+                    result.setText(" ");
+                } else {
+                    result.setText(BadOrderService.preview(cur.stock, q, cur.cost, custom));
+                }
+                result.setForeground(q != null && q > cur.stock ? Theme.DANGER : Theme.TEXT);
+                if (q != null && q > cur.stock) error.setText("Only " + cur.stock + " in stock.");
             } catch (IllegalArgumentException ex) {
                 result.setText(" ");
                 error.setText(ex.getMessage());
             }
         };
         qty.getDocument().addDocumentListener(listener(recalc));
+        amount.getDocument().addDocumentListener(listener(recalc));
         product.addActionListener(e -> recalc.run());
+        lossPuhunan.addActionListener(e -> recalc.run());
+        lossHand.addActionListener(e -> {
+            recalc.run();
+            amount.requestFocusInWindow();
+        });
         recalc.run();
 
         JButton todayBtn = UiKit.secondaryButton("Today");
@@ -424,13 +461,24 @@ final class StockDialogs {
         g.gridx = 0;
         g.gridy++;
         g.gridwidth = 2;
+        JPanel lossRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        lossRow.setOpaque(false);
+        lossRow.add(lossPuhunan);
+        lossRow.add(Box.createHorizontalStrut(14));
+        lossRow.add(lossHand);
+        lossRow.add(Box.createHorizontalStrut(6));
+        lossRow.add(amount);
+        form.add(UiKit.group("Loss to deduct", lossRow), g);
+        g.gridy++;
+        form.add(partHint, g);
+        g.gridy++;
         form.add(UiKit.group("Note", note), g);
         g.gridy++;
         form.add(result, g);
         g.gridy++;
-        JLabel hint = new JLabel("<html><div style='width:440px'>The pieces leave the stock now. Their puhunan is a loss: "
-                + "it lowers net profit in Sales &amp; Profit on the date found. A mistake can be undone in "
-                + "Inventory → Bad orders.</div></html>");
+        JLabel hint = new JLabel("<html><div style='width:440px'>The pieces leave the stock now. The loss (their puhunan, "
+                + "or the amount you set) lowers net profit in Sales &amp; Profit on the date found. A mistake can be "
+                + "undone in Inventory → Bad orders.</div></html>");
         hint.setFont(Theme.SMALL);
         hint.setForeground(Theme.MUTED);
         form.add(hint, g);
@@ -446,11 +494,19 @@ final class StockDialogs {
                 error.setText("Choose the product.");
                 return;
             }
+            final boolean hand = lossHand.isSelected();
             Integer q;
             try {
-                q = Money.parseInt(qty.getText(), "bad pieces", 1, 1_000_000);
+                q = Money.parseInt(qty.getText(), "bad pieces", hand ? 0 : 1, 1_000_000);
             } catch (IllegalArgumentException ex) {
                 q = null;
+            }
+            final BigDecimal custom;
+            try {
+                custom = hand ? Money.parse(amount.getText(), "amount to deduct", false) : null;
+            } catch (IllegalArgumentException ex) {
+                error.setText(ex.getMessage());
+                return;
             }
             LocalDate day;
             try {
@@ -460,7 +516,7 @@ final class StockDialogs {
             }
             final String r = BadOrderService.REASONS[Math.max(0, reason.getSelectedIndex())][0];
             final String n = note.getText().trim();
-            String problem = BadOrderService.check(q, cur.stock, r, n, day, today);
+            String problem = BadOrderService.check(q, cur.stock, r, n, day, today, custom);
             if (problem != null) {
                 error.setText(problem);
                 return;
@@ -475,7 +531,7 @@ final class StockDialogs {
             new SwingWorker<BadOrderService.Result, Void>() {
                 @Override
                 protected BadOrderService.Result doInBackground() throws Exception {
-                    return BadOrderService.record(cur.id, quantity, r, disp, foundOn, n.isEmpty() ? null : n, requestId);
+                    return BadOrderService.record(cur.id, quantity, r, disp, foundOn, n.isEmpty() ? null : n, requestId, custom);
                 }
 
                 @Override
@@ -484,12 +540,15 @@ final class StockDialogs {
                         BadOrderService.Result res = get();
                         saved[0] = true;
                         d.dispose();
-                        JOptionPane.showMessageDialog(owner, cur.name + "\n" + quantity + " "
+                        JOptionPane.showMessageDialog(owner, cur.name + "\n"
+                                        + (quantity == 0 ? "Part of one item" : String.valueOf(quantity)) + " "
                                         + BadOrderService.reasonLabel(r).toLowerCase() + ", "
                                         + BadOrderService.dispositionLabel(disp).toLowerCase() + " (found " + foundOn + ")."
-                                        + "\nStock " + res.stockBefore + " → " + res.stockAfter + ". "
+                                        + (quantity == 0 ? "\nStock stays " + res.stockAfter + ". "
+                                        : "\nStock " + res.stockBefore + " → " + res.stockAfter + ". ")
                                         + (res.loss == null ? "No puhunan, so no peso loss was counted."
-                                        : "Loss " + Money.peso(res.loss) + " (lowers net profit)."),
+                                        : "Loss " + Money.peso(res.loss) + (custom != null ? " (set by hand)" : "")
+                                        + " lowers net profit."),
                                 "Bad order recorded", JOptionPane.INFORMATION_MESSAGE);
                     } catch (Exception ex) {
                         Throwable cause = ex.getCause() != null ? ex.getCause() : ex;

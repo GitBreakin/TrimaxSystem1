@@ -46,24 +46,41 @@ class BadOrderTest {
         assertEquals(new BigDecimal("100.00"), BadOrderService.loss(5, new BigDecimal("20")));
         assertEquals(new BigDecimal("37.50"), BadOrderService.loss(3, new BigDecimal("12.50")));
         assertNull(BadOrderService.loss(5, null), "no puhunan: no peso loss, not 0");
-        assertTrue(BadOrderService.preview(50, 5, new BigDecimal("20")).startsWith("Stock 50 → 45"));
-        assertTrue(BadOrderService.preview(50, 5, new BigDecimal("20")).contains("Loss ₱"));
-        assertTrue(BadOrderService.preview(10, 2, null).contains("no puhunan"));
+        assertTrue(BadOrderService.preview(50, 5, new BigDecimal("20"), null).startsWith("Stock 50 → 45"));
+        assertTrue(BadOrderService.preview(50, 5, new BigDecimal("20"), null).contains("Loss ₱"));
+        assertTrue(BadOrderService.preview(10, 2, null, null).contains("no puhunan"));
     }
 
     @Test
     void inputIsCheckedBeforeSending() {
-        assertNull(BadOrderService.check(3, 10, "BROKEN", "", TODAY, TODAY));
-        assertNull(BadOrderService.check(10, 10, "EXPIRED", null, TODAY.minusDays(30), TODAY), "all of the stock is allowed");
-        assertNotNull(BadOrderService.check(null, 10, "BROKEN", "", TODAY, TODAY), "not a number");
-        assertNotNull(BadOrderService.check(0, 10, "BROKEN", "", TODAY, TODAY));
-        assertNotNull(BadOrderService.check(11, 10, "BROKEN", "", TODAY, TODAY), "more than the stock");
-        assertNotNull(BadOrderService.check(1, 10, "OTHER", " ab ", TODAY, TODAY), "Other needs a note");
-        assertNull(BadOrderService.check(1, 10, "OTHER", "rats in the box", TODAY, TODAY));
-        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "x".repeat(301), TODAY, TODAY));
-        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", TODAY.plusDays(1), TODAY), "future date");
-        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", TODAY.minusDays(367), TODAY), "older than a year");
-        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", null, TODAY), "date not readable");
+        assertNull(BadOrderService.check(3, 10, "BROKEN", "", TODAY, TODAY, null));
+        assertNull(BadOrderService.check(10, 10, "EXPIRED", null, TODAY.minusDays(30), TODAY, null), "all of the stock is allowed");
+        assertNotNull(BadOrderService.check(null, 10, "BROKEN", "", TODAY, TODAY, null), "not a number");
+        assertNotNull(BadOrderService.check(0, 10, "BROKEN", "", TODAY, TODAY, null));
+        assertNotNull(BadOrderService.check(11, 10, "BROKEN", "", TODAY, TODAY, null), "more than the stock");
+        assertNotNull(BadOrderService.check(1, 10, "OTHER", " ab ", TODAY, TODAY, null), "Other needs a note");
+        assertNull(BadOrderService.check(1, 10, "OTHER", "rats in the box", TODAY, TODAY, null));
+        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "x".repeat(301), TODAY, TODAY, null));
+        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", TODAY.plusDays(1), TODAY, null), "future date");
+        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", TODAY.minusDays(367), TODAY, null), "older than a year");
+        assertNotNull(BadOrderService.check(1, 10, "BROKEN", "", null, TODAY, null), "date not readable");
+    }
+
+    @Test
+    void aLossSetByHandAllowsZeroPiecesForPartOfOneItem() {
+        BigDecimal ten = new BigDecimal("10.00");
+        assertNull(BadOrderService.check(0, 20, "BROKEN", "", TODAY, TODAY, ten), "one bottle of a pack: 0 pieces, P10");
+        assertNull(BadOrderService.check(2, 20, "DAMAGED", "", TODAY, TODAY, new BigDecimal("50.5")));
+        assertNotNull(BadOrderService.check(0, 20, "BROKEN", "", TODAY, TODAY, null), "0 pieces needs an amount");
+        assertNotNull(BadOrderService.check(0, 20, "BROKEN", "", TODAY, TODAY, BigDecimal.ZERO), "an amount of 0");
+        assertNotNull(BadOrderService.check(0, 20, "BROKEN", "", TODAY, TODAY, new BigDecimal("10.005")), "3 decimals");
+        assertNotNull(BadOrderService.check(0, 20, "BROKEN", "", TODAY, TODAY, new BigDecimal("10000000.01")), "too large");
+        assertNotNull(BadOrderService.check(21, 20, "BROKEN", "", TODAY, TODAY, ten), "still not more than the stock");
+        assertEquals("Stock stays 20  \u00B7  Loss " + Money.peso(ten) + " (set by hand)", BadOrderService.preview(20, 0, new BigDecimal("180"), ten));
+        assertTrue(BadOrderService.preview(20, 2, new BigDecimal("180"), new BigDecimal("50.50")).startsWith("Stock 20 → 18"));
+        BadOrderService.Record r = rec("BROKEN", 0, "10.00", false);
+        r.lossSource = "CUSTOM";
+        assertTrue(r.partOfOneItem() && r.lossByHand());
     }
 
     @Test
