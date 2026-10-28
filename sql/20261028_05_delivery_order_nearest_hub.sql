@@ -23,7 +23,8 @@
 --
 -- ORDER: after 20261028_01 (distance_m). Re-runnable. Changes no row.
 -- Rollback: 20261028_95_rollback_delivery_order_nearest_hub.sql (puts back the previous order).
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production on 2026-10-28 (about 22:36 Asia/Manila) with the owner's approval, as migration
+-- 20261028_05_delivery_order_nearest_hub (one transaction).
 -- =====================================================================================================
 
 begin;

@@ -29,7 +29,7 @@ Within a group:
   - Clicking the column header sorts by it too.
 - **Booking window:** a *Delivery order* line, for example "#1 of 4 for Maria Santos (driver_maria) · 2.5 km from TRIMAX Hub (straight line)", or *From hub* with the distance for other bookings.
 
-## Database (`sql/20261028_05_delivery_order_nearest_hub.sql`, NOT applied to production)
+## Database (`sql/20261028_05_delivery_order_nearest_hub.sql`, applied to production 2026-10-28 ~22:36 with the owner's approval)
 
 - `trimax_private.hub_distance_m(lat, lon)`: metres from the hub (null without a pin).
 - `trimax_private.delivery_sequence(driver default all)`: the order above, per driver. Owner only.
@@ -55,4 +55,9 @@ Without the update, the Desktop leaves the column empty and the driver app keeps
   - rollback and re-apply
 - **Desktop unit tests: 91 passed** (4 new). The PDF tests were not run here.
 - **End-to-end on a local demo database: 4 checks passed.** For driver_maria, the Desktop order (#40, #36, #10, #15) is the same as the order her phone receives from the server. The booking window shows "#1 of 4 ...".
-- Not checked on a real phone or on production data.
+- **Production, after the apply:**
+  - the 3 functions equal the tested copy
+  - the phone function keeps its access
+  - the bookings, customers and audit log are unchanged
+  - the 2 open bookings (one per driver) are each that driver's #1
+- Not checked on a real phone yet.
