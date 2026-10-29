@@ -2,7 +2,7 @@
 
 The owner asked for this: "sa agent app daw dapat kapag mag add booking, may option don na visit or via text/call, kapag visit need ng picture tas papasok sa admin".
 
-Database update: `sql/20261029_02_booking_order_via.sql`. Rollback: `sql/20261029_98_rollback_booking_order_via.sql`. The rollback refuses, and changes nothing, once any booking records Visit or Text / Call.
+Database update: `sql/20261029_02_booking_order_via.sql`, **applied to production 2026-10-29 ~12:50** with the owner's approval. Rollback: `sql/20261029_98_rollback_booking_order_via.sql`. The rollback refuses, and changes nothing, once any booking records Visit or Text / Call.
 
 ## Agent app (New Booking → summary)
 

@@ -28,6 +28,7 @@
 --
 -- ORDER: after 20261028_07 (the create booking it calls). Re-runnable. Adds 5 nullable columns, 1 check,
 -- 1 unique index, 1 function. Changes no rows. Rollback: 20261029_98 (refused once bookings use it).
+-- APPLIED to production 2026-10-29 ~12:50 (Asia/Manila) with the owner's approval (1 transaction).
 -- =====================================================================================================
 
 begin;
