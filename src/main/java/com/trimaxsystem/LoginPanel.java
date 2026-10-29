@@ -254,8 +254,9 @@ public class LoginPanel extends JPanel {
         String detail = error.substring(error.indexOf(':') + 1).trim();
         String d = detail.toLowerCase(Locale.ROOT);
         if (d.contains("not configured")) {
-            return "This computer is not connected to the TRI-MAX database yet. Copy trimax.properties.example "
-                    + "to trimax.properties and fill in the database settings.";
+            return "This computer is not connected to the TRI-MAX database yet. Put the trimax.properties file "
+                    + "(a filled-in copy of trimax.properties.example) in " + DatabaseConnection.userSettingsFile()
+                    + " or in the same folder as the TRIMAX app, then open the app again.";
         }
         if (d.contains("password authentication failed")) {
             return "The database password in trimax.properties is not accepted. Ask the system owner for the "

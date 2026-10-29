@@ -12,8 +12,8 @@ computer" and nothing is saved.
 ## Where the settings go
 
 Put them in the same private `trimax.properties` file that already holds the database settings (in the
-project folder, or in `%USERPROFILE%\.trimax\trimax.properties`). That file is ignored by Git and must never
-be committed or shared. Restart TRIMAX after changing it.
+project folder, next to the TRIMAX .exe or .jar, or in `%USERPROFILE%\.trimax\trimax.properties`; the first one
+found is used). That file is ignored by Git and must never be committed or shared. Restart TRIMAX after changing it.
 
 | Key | Needed | Meaning |
 | --- | --- | --- |
