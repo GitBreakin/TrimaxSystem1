@@ -16,7 +16,8 @@
 -- trimax_report_issue (20261025_03) keeps inserting exactly as before. Resolving never deletes an alert.
 --
 -- ORDER: after 20261025_03. Re-runnable. Adds 3 nullable columns, 1 check, 1 index, 1 function.
--- Changes no rows. NOT APPLIED to production. Needs approval.
+-- Changes no rows. APPLIED to production 2026-10-29 ~10:55 (Asia/Manila) with the owner's approval (1 transaction),
+-- after every later update; it replaces none of their functions.
 -- =====================================================================================================
 
 begin;
@@ -97,6 +98,6 @@ begin
     return jsonb_build_object('notification_id', p_notification_id, 'resolved_at', v_now, 'resolved_by', p_admin_username);
 end $function$;
 
-revoke all on function trimax_private.resolve_alert(text, bigint, text) from public;
+revoke all on function trimax_private.resolve_alert(text, bigint, text) from public, anon, authenticated, service_role;
 
 commit;

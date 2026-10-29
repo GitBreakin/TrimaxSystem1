@@ -296,4 +296,15 @@ rm -f "/tmp/$DB.54.log"
 echo "== Half case: rollback after half cases were sold is refused and changes nothing"
 if psql_owner -f 20261028_97_rollback_half_case.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although half cases exist"; exit 1; fi
 check "select (select data_type = 'numeric' from information_schema.columns where table_name = 'products' and column_name = 'stock') and to_regprocedure('trimax_private.set_product_half_price(text,integer,numeric)') is not null and exists (select 1 from booking_items where unit = 'HALF')" "refused rollback left the half cases, the stock and the functions as they were"
+echo "== Payroll for employees without an account: rollback while unused puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261029_01_payroll_staff.sql
+psql_owner -f 20261029_99_rollback_payroll_staff.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and to_regclass('public.payroll_staff') is null and not exists (select 1 from information_schema.columns where table_name = 'payroll_records' and column_name = 'staff_id')" "rollback puts back every function exactly and removes the list and the link"
+psql_owner -f 20261029_01_payroll_staff.sql
+psql_owner -f 20261029_01_payroll_staff.sql
+psql_su -d "$DB" -f tests/55_payroll_staff_tests.sql > "/tmp/$DB.55.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL STAFF/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.55.log"
+grep -q '^ALL PAYROLL STAFF SQL TESTS PASSED' "/tmp/$DB.55.log" || { echo "FAIL payroll staff tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.55.log"
 echo "ALL DATABASE TESTS PASSED"

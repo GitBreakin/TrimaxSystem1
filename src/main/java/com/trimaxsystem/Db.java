@@ -19,11 +19,13 @@ final class Db {
     static final String UPDATE_28_BAD_ORDERS = "database update 20261028_04_bad_orders";
     static final String UPDATE_28_BAD_ORDER_LOSS = "database update 20261028_06_bad_order_custom_loss";
     static final String UPDATE_28_HALF_CASE = "database update 20261028_07_half_case";
+    static final String UPDATE_29_PAYROLL_STAFF = "database update 20261029_01_payroll_staff";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
     private static volatile boolean badOrdersReady;
     private static volatile boolean halfCaseReady;
+    private static volatile boolean payrollStaffReady;
 
     private Db() {
     }
@@ -116,6 +118,25 @@ final class Db {
             return false;
         }
         return halfCaseReady;
+    }
+
+    /**
+     * True when the server keeps a list of employees without an app account for payroll (20261029_01).
+     */
+    static boolean payrollStaffReady() {
+        if (payrollStaffReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regclass('public.payroll_staff') is not null "
+                             + "and to_regprocedure('trimax_private.save_payroll_staff(text,bigint,text,text,text,boolean)') is not null "
+                             + "and to_regprocedure('trimax_private.save_payroll(text,bigint,uuid,text,text,date,date,numeric,"
+                             + "numeric,numeric,text,date,text,text,bigint)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            payrollStaffReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return payrollStaffReady;
     }
 
     /** The update the bad-order screens still need ("" when the server has it). */
