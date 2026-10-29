@@ -184,8 +184,13 @@ final class ProofPhotosPanel extends JPanel {
     }
 
     private static void openMap(Component parent, BookingService.Proof proof) {
+        openMap(parent, proof.latitude, proof.longitude);
+    }
+
+    /** Opens the place in the browser's map, or shows the link when there is no browser. */
+    static void openMap(Component parent, double latitude, double longitude) {
         String url = String.format(Locale.ROOT, "https://www.google.com/maps/search/?api=1&query=%.6f,%.6f",
-                proof.latitude, proof.longitude);
+                latitude, longitude);
         try {
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                 Desktop.getDesktop().browse(URI.create(url));
@@ -216,7 +221,7 @@ final class ProofPhotosPanel extends JPanel {
         return crop.getScaledInstance(w, h, Image.SCALE_SMOOTH);
     }
 
-    private static String esc(String s) {
+    static String esc(String s) {
         return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 }

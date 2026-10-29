@@ -241,6 +241,21 @@ public class BookingService {
             return "mobile".equals(createdVia);
         }
 
+        // How the agent took the order (sql/20261029_02; all null before it, for Desktop bookings and for
+        // bookings from an older agent app). A visit always has its photo in the private customer-photos bucket.
+        public String orderVia;                        // OrderVia.VISIT / OrderVia.TEXT_CALL
+        public String visitPhotoPath;
+        public Double visitLatitude, visitLongitude;
+        public Timestamp visitTakenAt;
+
+        public boolean hasVisitPhoto() {
+            return OrderVia.VISIT.equals(orderVia) && visitPhotoPath != null;
+        }
+
+        public boolean visitHasGps() {
+            return visitLatitude != null && visitLongitude != null;
+        }
+
         /** Drop-off photos the driver sent (sql/20261025_04); empty when none or the table is missing. */
         public List<Proof> proofs = new ArrayList<>();
     }
@@ -376,6 +391,23 @@ public class BookingService {
                         d.discountValue = rs.getBigDecimal(4);
                         d.discountBy = rs.getString(5);
                         d.discountAt = rs.getTimestamp(6);
+                    }
+                }
+            }
+            // Read through to_jsonb so this also works on a server without 20261029_02.
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT to_jsonb(b) ->> 'order_via', to_jsonb(b) ->> 'visit_photo_path', "
+                            + "(to_jsonb(b) ->> 'visit_latitude')::double precision, "
+                            + "(to_jsonb(b) ->> 'visit_longitude')::double precision, "
+                            + "(to_jsonb(b) ->> 'visit_taken_at')::timestamptz FROM bookings b WHERE b.booking_id = ?")) {
+                ps.setInt(1, bookingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        d.orderVia = rs.getString(1);
+                        d.visitPhotoPath = rs.getString(2);
+                        d.visitLatitude = (Double) rs.getObject(3);
+                        d.visitLongitude = (Double) rs.getObject(4);
+                        d.visitTakenAt = rs.getTimestamp(5);
                     }
                 }
             }

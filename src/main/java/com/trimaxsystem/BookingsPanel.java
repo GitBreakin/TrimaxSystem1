@@ -39,13 +39,15 @@ public class BookingsPanel extends JPanel {
     private static final String TZ_SQL = "Asia/Manila";
 
     private static final String[] COLS = {"Booking", "Customer", "Date / Time", "Items", "Total", "Driver",
-            "Order \u00B7 km", "Status", "Delivery"};
+            "Order \u00B7 km", "Status", "Delivery", "Taken"};
     /** ORDER BY expression for each column. Only these fixed strings are ever put into the query. */
     private static final String[] SORT_SQL = {
             "b.booking_id", "LOWER(c.client_name)", "b.transc_date", "item_count",
             "b.total_amount", "LOWER(COALESCE(u.name, 'Unassigned'))", DeliveryOrder.SORT_SQL, "b.status",
-            "COALESCE(b.delivery_status, CASE WHEN b.created_via = 'mobile' THEN '0' ELSE '' END)"};
-    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_ORDER = 6, COL_STATUS = 7, COL_DELIVERY = 8;
+            "COALESCE(b.delivery_status, CASE WHEN b.created_via = 'mobile' THEN '0' ELSE '' END)",
+            "COALESCE(to_jsonb(b) ->> 'order_via', '')"};
+    private static final int COL_ID = 0, COL_ITEMS = 3, COL_TOTAL = 4, COL_ORDER = 6, COL_STATUS = 7, COL_DELIVERY = 8,
+            COL_TAKEN = 9;
     private static final int AUTO_REFRESH_MS = 30_000;
     private static final java.time.format.DateTimeFormatter CLOCK = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
 
@@ -297,6 +299,9 @@ public class BookingsPanel extends JPanel {
         table.setFillsViewportHeight(true);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        // "Taken" holds one short word; leave the room to the customer and the date
+        table.getColumnModel().getColumn(COL_TAKEN).setPreferredWidth(70);
+        table.getColumnModel().getColumn(COL_TAKEN).setMaxWidth(110);
 
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
@@ -322,6 +327,9 @@ public class BookingsPanel extends JPanel {
                 } else if (col == COL_ORDER) {
                     if (text.startsWith("#")) setFont(Theme.NAV_ON);
                     else setForeground(Theme.MUTED);
+                } else if (col == COL_TAKEN) {
+                    if (OrderVia.listLabel(OrderVia.VISIT).equals(text)) setFont(Theme.NAV_ON);
+                    else setForeground(Theme.MUTED);
                 } else if (col == COL_DELIVERY) {
                     if (DeliveryStatus.label(DeliveryStatus.FAILED).equals(text)) {
                         setForeground(Theme.DANGER);
@@ -343,7 +351,8 @@ public class BookingsPanel extends JPanel {
         header.setPreferredSize(new Dimension(100, 34));
         header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         header.setToolTipText("Click a column to sort. Order \u00B7 km: the driver's delivery order "
-                + "(#1 = nearest to the TRIMAX Hub, as in the driver app) and the distance from the hub");
+                + "(#1 = nearest to the TRIMAX Hub, as in the driver app) and the distance from the hub. "
+                + "Taken: how the agent took the order (Visit, with a photo, or Text / Call)");
         header.setDefaultRenderer(new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable t, Object value, boolean sel,
@@ -629,6 +638,7 @@ public class BookingsPanel extends JPanel {
                     + (mobile ? "b.created_via, b.driver_username, b.delivery_status"
                               : "NULL::text, NULL::text, NULL::text")
                     + (order ? ", ds.seq, " + DeliveryOrder.DISTANCE_SQL : ", NULL::integer, NULL::double precision")
+                    + ", to_jsonb(b) ->> 'order_via'"   // sql/20261029_02; null before it
                     + FROM_WHERE_BASE
                     + (order ? "LEFT JOIN " + DeliveryOrder.SEQUENCE_SQL + " ds ON ds.booking_id = b.booking_id " : "")
                     + where
@@ -657,7 +667,8 @@ public class BookingsPanel extends JPanel {
                                 rs.getBigDecimal(5), rs.getString(6),
                                 order ? DeliveryOrder.cell(seqOrNull, metersOrNull) : "",
                                 rs.getString(7),
-                                mobile ? DeliveryStatus.listLabel(rs.getString(8), rs.getString(9), rs.getString(10)) : ""});
+                                mobile ? DeliveryStatus.listLabel(rs.getString(8), rs.getString(9), rs.getString(10)) : "",
+                                OrderVia.listLabel(rs.getString(13))});
                     }
                 }
             }

@@ -307,4 +307,18 @@ psql_su -d "$DB" -f tests/55_payroll_staff_tests.sql > "/tmp/$DB.55.log" 2>&1 ||
 sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL STAFF/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.55.log"
 grep -q '^ALL PAYROLL STAFF SQL TESTS PASSED' "/tmp/$DB.55.log" || { echo "FAIL payroll staff tests (see above)"; exit 1; }
 rm -f "/tmp/$DB.55.log"
+echo "== Visit or Text / Call: rollback while unused puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261029_02_booking_order_via.sql
+psql_owner -f 20261029_98_rollback_booking_order_via.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and not exists (select 1 from information_schema.columns where table_name = 'bookings' and column_name in ('order_via', 'visit_photo_path', 'visit_latitude', 'visit_longitude', 'visit_taken_at')) and to_regclass('public.bookings_visit_photo_key') is null" "rollback puts back every function exactly and removes the 5 columns and the index"
+psql_owner -f 20261029_02_booking_order_via.sql
+psql_owner -f 20261029_02_booking_order_via.sql
+psql_su -d "$DB" -f tests/56_booking_order_via_tests.sql > "/tmp/$DB.56.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL BOOKING ORDER VIA/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.56.log"
+grep -q '^ALL BOOKING ORDER VIA SQL TESTS PASSED' "/tmp/$DB.56.log" || { echo "FAIL booking order via tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.56.log"
+echo "== Visit or Text / Call: rollback after bookings use it is refused and changes nothing"
+if psql_owner -f 20261029_98_rollback_booking_order_via.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although bookings use it"; exit 1; fi
+check "select to_regprocedure('public.trimax_agent_create_booking_v2(uuid,text,text,text,double precision,double precision,jsonb,text,text,text,text,double precision,double precision,timestamptz)') is not null and exists (select 1 from bookings where order_via = 'VISIT' and visit_photo_path is not null)" "refused rollback left the function and the recorded visits"
 echo "ALL DATABASE TESTS PASSED"
