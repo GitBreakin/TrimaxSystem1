@@ -127,6 +127,28 @@ trend). Empty periods show an empty state.
 - History filters: employee, status, and the range in which the period ends. The summary shows totals
   for the filtered records.
 
+### Employees without an app account (database update `20261029_01`)
+
+Owner's request of 2026-10-29: helpers, cashiers, guards and others are paid too, not only agents and drivers.
+Their pay must lower the profit as well.
+
+- **Payroll → Employees...** opens the list of employees without an app account.
+  - **Add employee...** asks for the full name, a position (type one, or pick Helper, Cashier, Warehouse staff, Security guard, Office staff or Mechanic) and an optional contact number (09XXXXXXXXX).
+  - The same name twice is refused (any capitalization).
+  - **Edit...** changes the name, position or contact number. Records already saved keep the name they had.
+  - **No longer working here** hides them from new payroll records; their records stay. **Working here again** undoes it.
+  - Adding and changing employees are audited.
+- **New payroll record** lists them with the agents and drivers, for example *Juan Dela Cruz (Helper)*. The name is filled in from the list.
+- The Employee filter above the list shows only their records.
+- Their payroll lowers net profit like any payroll: **net profit = gross profit − payroll − other expenses − bad orders**.
+- Without the update, "Other person (type the name)" still works, as before.
+
+Database: `public.payroll_staff` (owner only, no API access). `payroll_records.staff_id` records which employee a
+payroll record is for. A record is for an account or for an employee without one, never both.
+`trimax_private.save_payroll_staff` adds and edits employees. `save_payroll` gets a 15-argument version with the
+employee; the 14-argument version older Desktops call stays, and keeps a record's employee when it is edited.
+Rollback: `sql/20261029_99_rollback_payroll_staff.sql`.
+
 ## Other expenses (Expenses, database update `20261027_02`)
 
 Owner's request of 2026-10-27: business costs that are not payroll and not stock lower net profit.

@@ -45,6 +45,8 @@ public class PayrollPanel extends JPanel {
     private final JButton btnNew = UiKit.primaryButton("New payroll record");
     private final JButton btnEdit = UiKit.secondaryButton("Edit...");
     private final JButton btnVoid = UiKit.dangerButton("Void...");
+    /** Employees without an app account (helpers, cashiers...): sql/20261029_01. */
+    private final JButton btnStaff = UiKit.secondaryButton("Employees...");
     private int seq;
 
     public PayrollPanel() {
@@ -122,6 +124,8 @@ public class PayrollPanel extends JPanel {
         });
         btnEdit.addActionListener(e -> edit());
         btnVoid.addActionListener(e -> voidSelected());
+        btnStaff.setToolTipText("Add the employees who have no app account (helper, cashier...), so they can be paid here too");
+        btnStaff.addActionListener(e -> openStaff());
 
         JPanel tableCard = UiKit.card(new BorderLayout(0, 8), 12, 14);
         JPanel head = new JPanel(new BorderLayout());
@@ -129,6 +133,7 @@ public class PayrollPanel extends JPanel {
         head.add(UiKit.cardHeading("Payroll records", "Net pay = basic pay + allowances − deductions"), BorderLayout.WEST);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         actions.setOpaque(false);
+        actions.add(btnStaff);
         actions.add(btnVoid);
         actions.add(btnEdit);
         actions.add(btnNew);
@@ -144,6 +149,11 @@ public class PayrollPanel extends JPanel {
         newFromEmpty.addActionListener(e -> {
             if (PayrollEditor.open(SwingUtilities.getWindowAncestor(this), null, employees)) load();
         });
+        // Also here: before the first payroll record the list (and its buttons) is not shown.
+        JButton staffFromEmpty = UiKit.secondaryButton("Employees...");
+        staffFromEmpty.setToolTipText(btnStaff.getToolTipText());
+        staffFromEmpty.addActionListener(e -> openStaff());
+        stateActions.add(staffFromEmpty);
         stateActions.add(newFromEmpty);
         stateCard.add(stateActions, BorderLayout.NORTH);
         stateCard.add(state, BorderLayout.CENTER);
@@ -185,6 +195,18 @@ public class PayrollPanel extends JPanel {
         btnVoid.setEnabled(live);
     }
 
+    /** Employees without an app account: add, edit, mark as no longer working here. */
+    private void openStaff() {
+        if (!Db.payrollStaffReady()) {
+            JOptionPane.showMessageDialog(this, Db.notReadyMessage("The list of employees without an app account",
+                    Db.UPDATE_29_PAYROLL_STAFF) + "\nUntil then, choose \"Other person (type the name)\" in a payroll record.",
+                    "Employees", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        PayrollStaffDialog.open(SwingUtilities.getWindowAncestor(this));
+        loadEmployees();
+    }
+
     private void loadEmployees() {
         new SwingWorker<List<PayrollService.Employee>, Void>() {
             @Override
@@ -204,7 +226,7 @@ public class PayrollPanel extends JPanel {
                         employee.addItem("All employees");
                         for (PayrollService.Employee e : list) {
                             employee.addItem(e);
-                            if (keep instanceof PayrollService.Employee && ((PayrollService.Employee) keep).username.equals(e.username)) {
+                            if (keep instanceof PayrollService.Employee && ((PayrollService.Employee) keep).same(e)) {
                                 employee.setSelectedItem(e);
                             }
                         }
@@ -239,7 +261,9 @@ public class PayrollPanel extends JPanel {
             return;
         }
         Object e = employee.getSelectedItem();
-        final String user = e instanceof PayrollService.Employee ? ((PayrollService.Employee) e).username : null;
+        final PayrollService.Employee who = e instanceof PayrollService.Employee ? (PayrollService.Employee) e : null;
+        final String user = who != null && !who.isStaff() ? who.username : null;
+        final Long staffId = who != null && who.isStaff() ? who.staffId : null;
         final String st = STATUS_CODE[Math.max(0, status.getSelectedIndex())];
         final int mySeq = ++seq;
         state.showLoading("Loading payroll...");
@@ -247,7 +271,7 @@ public class PayrollPanel extends JPanel {
         new SwingWorker<PayrollService.Page, Void>() {
             @Override
             protected PayrollService.Page doInBackground() throws Exception {
-                return PayrollService.list(user, st, f, t);
+                return PayrollService.list(user, staffId, st, f, t);
             }
 
             @Override
@@ -349,7 +373,11 @@ public class PayrollPanel extends JPanel {
 
             JComboBox<Object> who = new JComboBox<>();
             who.addItem("Other person (type the name)");
-            for (PayrollService.Employee e : employees) who.addItem(e);
+            for (PayrollService.Employee e : employees) {
+                // employees without an account who no longer work here: only on their own records
+                boolean gone = e.isStaff() && !"Active".equals(e.status);
+                if (!gone || (!isNew && rec.staffId != null && rec.staffId.equals(e.staffId))) who.addItem(e);
+            }
             JTextField name = new JTextField(22);
             JTextField start = new JTextField(10), end = new JTextField(10);
             JTextField basic = new JTextField(10), allow = new JTextField(10), ded = new JTextField(10);
@@ -388,7 +416,10 @@ public class PayrollPanel extends JPanel {
             } else {
                 boolean found = false;
                 for (int i = 1; i < who.getItemCount(); i++) {
-                    if (((PayrollService.Employee) who.getItemAt(i)).username.equals(rec.username)) {
+                    PayrollService.Employee e = (PayrollService.Employee) who.getItemAt(i);
+                    boolean match = rec.staffId != null ? rec.staffId.equals(e.staffId)
+                            : rec.username != null && rec.username.equals(e.username);
+                    if (match) {
                         who.setSelectedIndex(i);
                         found = true;
                     }
@@ -535,7 +566,9 @@ public class PayrollPanel extends JPanel {
                     return;
                 }
                 Object w = who.getSelectedItem();
-                final String user = w instanceof PayrollService.Employee ? ((PayrollService.Employee) w).username : null;
+                final PayrollService.Employee chosen = w instanceof PayrollService.Employee ? (PayrollService.Employee) w : null;
+                final String user = chosen != null && !chosen.isStaff() ? chosen.username : null;
+                final Long staffId = chosen != null && chosen.isStaff() ? chosen.staffId : null;
                 final String m = method.getSelectedIndex() <= 0 ? null : SalesService.METHODS[method.getSelectedIndex() - 1][0];
                 final boolean isPaid = paid.isSelected();
                 final String nt = notes.getText().trim();
@@ -545,7 +578,7 @@ public class PayrollPanel extends JPanel {
                 new SwingWorker<Long, Void>() {
                     @Override
                     protected Long doInBackground() throws Exception {
-                        return PayrollService.save(isNew ? null : rec.id, requestId, user, nm, s, en, b,
+                        return PayrollService.save(isNew ? null : rec.id, requestId, user, staffId, nm, s, en, b,
                                 a == null ? BigDecimal.ZERO : a, de == null ? BigDecimal.ZERO : de, isPaid, po, m,
                                 nt.isEmpty() ? null : nt);
                     }
