@@ -300,7 +300,11 @@ public final class ReportService {
                 conn.rollback(sp);            // no admin_notifications table: alerts not set up
                 r.alerts = null;
             }
-            if (r.alerts != null) {
+            // Only ask for open alerts when the server has alert resolution (sql/20261025_07): before, the
+            // query failed every time and left an ERROR in the database log.
+            if (r.alerts != null && !hasColumn(conn, "admin_notifications", "resolved_at")) {
+                r.openAlerts = null;
+            } else if (r.alerts != null) {
                 sp = conn.setSavepoint();
                 try (PreparedStatement ps = range(conn.prepareStatement(openAlerts), from, to, null);
                      ResultSet rs = ps.executeQuery()) {
@@ -380,6 +384,18 @@ public final class ReportService {
     }
 
     /** 42P01 no such table, 3F000 no such schema, 42501 not allowed: the optional part is skipped. */
+    /** True when public.table has the column (read from the catalog, so it never raises an error). */
+    private static boolean hasColumn(Connection conn, String table, String column) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM pg_attribute WHERE attrelid = "
+                + "to_regclass('public.' || quote_ident(?)) AND attname = ? AND attnum > 0 AND NOT attisdropped")) {
+            ps.setString(1, table);
+            ps.setString(2, column);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     private static boolean missing(SQLException e) {
         String s = e.getSQLState();
         return "42P01".equals(s) || "3F000".equals(s) || "42501".equals(s);
