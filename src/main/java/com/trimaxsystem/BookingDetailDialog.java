@@ -157,12 +157,18 @@ public class BookingDetailDialog extends JDialog {
         // ---- middle: details + items ----
         JPanel middle = new JPanel(new BorderLayout(0, 12));
         middle.setOpaque(false);
-        // Drop-off photos from the driver app, once a driver is on the booking (or photos exist).
-        if (d.driverUsername != null || !d.proofs.isEmpty()) {
+        // The agent's visit photo (when the order was taken by a visit) and the drop-off photos from the
+        // driver app (once a driver is on the booking, or photos exist), side by side under the details.
+        boolean proofs = d.driverUsername != null || !d.proofs.isEmpty();
+        if (d.hasVisitPhoto() || proofs) {
+            JPanel photos = new JPanel(new BorderLayout(12, 0));
+            photos.setOpaque(false);
+            if (d.hasVisitPhoto()) photos.add(card(new VisitPhotoPanel(d)), BorderLayout.WEST);
+            if (proofs) photos.add(card(new ProofPhotosPanel(d.proofs, d.deliveryStatus)), BorderLayout.CENTER);
             JPanel upper = new JPanel(new BorderLayout(0, 12));
             upper.setOpaque(false);
             upper.add(buildInfoCard(d), BorderLayout.NORTH);
-            upper.add(card(new ProofPhotosPanel(d.proofs, d.deliveryStatus)), BorderLayout.CENTER);
+            upper.add(photos, BorderLayout.CENTER);
             middle.add(upper, BorderLayout.NORTH);
         } else {
             middle.add(buildInfoCard(d), BorderLayout.NORTH);
@@ -188,6 +194,8 @@ public class BookingDetailDialog extends JDialog {
         int r = 0;
         addRow(grid, r++, "Created", Theme.formatWhen(d.date) + "  (Manila time, UTC+8)"
                 + (d.fromMobile() ? "  -  from the mobile app" + (d.createdBy == null ? "" : " (" + d.createdBy + ")") : ""));
+        String taken = OrderVia.detail(d.orderVia, d.fromMobile(), d.hasVisitPhoto(), d.visitHasGps());
+        if (taken != null) addRow(grid, r++, "Order taken", taken);
         addRow(grid, r++, "Customer", orDash(d.clientName));
         addRow(grid, r++, "Address", orDash(d.address));
         addRow(grid, r++, "Contact", orDash(d.contact));
