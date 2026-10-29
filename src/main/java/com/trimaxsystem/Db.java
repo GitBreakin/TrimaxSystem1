@@ -20,12 +20,14 @@ final class Db {
     static final String UPDATE_28_BAD_ORDER_LOSS = "database update 20261028_06_bad_order_custom_loss";
     static final String UPDATE_28_HALF_CASE = "database update 20261028_07_half_case";
     static final String UPDATE_29_PAYROLL_STAFF = "database update 20261029_01_payroll_staff";
+    static final String UPDATE_29_BOOKING_EDIT = "database update 20261029_03_booking_edit_and_driver_summary";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
     private static volatile boolean badOrdersReady;
     private static volatile boolean halfCaseReady;
     private static volatile boolean payrollStaffReady;
+    private static volatile boolean bookingEditReady;
 
     private Db() {
     }
@@ -137,6 +139,21 @@ final class Db {
             return false;
         }
         return payrollStaffReady;
+    }
+
+    /** True when the server lets the Admin change a booking's order after booking (20261029_03). */
+    static boolean bookingEditReady() {
+        if (bookingEditReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.update_booking_items(text,integer,text,jsonb,text)') is not null "
+                             + "and to_regprocedure('trimax_private.booking_items_signature(integer)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            bookingEditReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return bookingEditReady;
     }
 
     /** The update the bad-order screens still need ("" when the server has it). */

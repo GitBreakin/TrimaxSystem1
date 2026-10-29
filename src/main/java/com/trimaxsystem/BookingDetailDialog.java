@@ -140,7 +140,8 @@ public class BookingDetailDialog extends JDialog {
         top.add(Box.createVerticalStrut(2));
         top.add(status);
         if (notice != null) {
-            JLabel n = new JLabel(notice);
+            // wraps: an order change lists every line that changed
+            JLabel n = new JLabel("<html><div style='width:640px'>" + ProofPhotosPanel.esc(notice) + "</div></html>");
             n.setFont(Theme.SUBTLE);
             n.setForeground(Theme.OK);
             n.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -154,29 +155,44 @@ public class BookingDetailDialog extends JDialog {
         top.add(next);
         body.add(top, BorderLayout.NORTH);
 
-        // ---- middle: details + items ----
-        JPanel middle = new JPanel(new BorderLayout(0, 12));
-        middle.setOpaque(false);
+        // ---- middle, scrolling: what was ordered, details, photos, history. The items always get their full
+        // height (on a small screen the window scrolls instead of squeezing the order out of view).
+        // BoxLayout, not GridBagLayout: a GridBagLayout narrower than its preferred width falls back to minimum
+        // sizes for everything, which cut the items table down to a sliver.
+        JPanel page = new JPanel();
+        page.setOpaque(false);
+        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
+        List<JComponent> sections = new ArrayList<>();
+        sections.add(buildItemsCard(d));     // what was ordered comes first
+        sections.add(buildInfoCard(d));
         // The agent's visit photo (when the order was taken by a visit) and the drop-off photos from the
-        // driver app (once a driver is on the booking, or photos exist), side by side under the details.
+        // driver app (once a driver is on the booking, or photos exist), side by side.
         boolean proofs = d.driverUsername != null || !d.proofs.isEmpty();
         if (d.hasVisitPhoto() || proofs) {
             JPanel photos = new JPanel(new BorderLayout(12, 0));
             photos.setOpaque(false);
             if (d.hasVisitPhoto()) photos.add(card(new VisitPhotoPanel(d)), BorderLayout.WEST);
             if (proofs) photos.add(card(new ProofPhotosPanel(d.proofs, d.deliveryStatus)), BorderLayout.CENTER);
-            JPanel upper = new JPanel(new BorderLayout(0, 12));
-            upper.setOpaque(false);
-            upper.add(buildInfoCard(d), BorderLayout.NORTH);
-            upper.add(photos, BorderLayout.CENTER);
-            middle.add(upper, BorderLayout.NORTH);
-        } else {
-            middle.add(buildInfoCard(d), BorderLayout.NORTH);
+            sections.add(photos);
         }
-        middle.add(buildItemsCard(d), BorderLayout.CENTER);
-        body.add(middle, BorderLayout.CENTER);
+        sections.add(buildHistory(d));
+        for (int i = 0; i < sections.size(); i++) {
+            JComponent c = sections.get(i);
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+            if (i > 0) page.add(Box.createVerticalStrut(12));
+            page.add(c);
+        }
+        // Always at its full height: the window scrolls, nothing is squeezed.
+        FullHeightPage scrollable = new FullHeightPage();
+        scrollable.add(page, BorderLayout.NORTH);
+        JScrollPane scroll = new JScrollPane(scrollable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(Theme.BACKGROUND);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        body.add(scroll, BorderLayout.CENTER);
 
-        // ---- bottom: status history note + actions ----
+        // ---- bottom: actions ----
         body.add(buildActions(d), BorderLayout.SOUTH);
 
         body.revalidate();
@@ -277,7 +293,6 @@ public class BookingDetailDialog extends JDialog {
         t.setFont(Theme.SUBTLE);
         t.setShowVerticalLines(false);
         t.setGridColor(Theme.BORDER);
-        t.setFillsViewportHeight(true);
         t.getTableHeader().setReorderingAllowed(false);
         t.getTableHeader().setFont(new Font("SansSerif", Font.BOLD, 12));
         DefaultTableCellRenderer right = new DefaultTableCellRenderer();
@@ -297,23 +312,41 @@ public class BookingDetailDialog extends JDialog {
         };
         t.getColumnModel().getColumn(0).setCellRenderer(productCell);
 
-        JLabel heading = new JLabel("Items");
+        JLabel heading = new JLabel("Items ordered" + (d.items.isEmpty() ? "" : "  (" + d.items.size() + ")"));
         heading.setFont(new Font("SansSerif", Font.BOLD, 15));
         heading.setForeground(Theme.TEXT);
-        heading.setBorder(new EmptyBorder(0, 0, 8, 0));
+        JPanel head = new JPanel(new BorderLayout());
+        head.setOpaque(false);
+        head.setBorder(new EmptyBorder(0, 0, 8, 0));
+        head.add(heading, BorderLayout.WEST);
+        if (canEditOrder(d)) {
+            JButton edit = UiKit.secondaryButton("Edit order");
+            edit.setToolTipText("Change a quantity, remove an item or add one (stock and the total follow)");
+            edit.addActionListener(e -> editOrder());
+            head.add(edit, BorderLayout.EAST);
+        }
 
         JPanel p = new JPanel(new BorderLayout());
         p.setOpaque(false);
-        p.add(heading, BorderLayout.NORTH);
+        p.add(head, BorderLayout.NORTH);
         if (d.items.isEmpty()) {
             JLabel none = new JLabel("This booking has no items.");
             none.setFont(Theme.SUBTLE);
             none.setForeground(Theme.MUTED);
             p.add(none, BorderLayout.CENTER);
         } else {
-            JScrollPane sp = new JScrollPane(t);
-            sp.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
-            p.add(sp, BorderLayout.CENTER);
+            // Every line shows (no inner scroll bar); the window scrolls when the order is long.
+            JPanel tableBox = new JPanel(new BorderLayout());
+            tableBox.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+            tableBox.add(t.getTableHeader(), BorderLayout.NORTH);
+            tableBox.add(t, BorderLayout.CENTER);
+            p.add(tableBox, BorderLayout.CENTER);
+            JLabel total = new JLabel((d.hasDiscount() ? "Final price: " : "Total: ") + Theme.money(d.total));
+            total.setFont(new Font("SansSerif", Font.BOLD, 14));
+            total.setForeground(Theme.TEXT);
+            total.setHorizontalAlignment(SwingConstants.RIGHT);
+            total.setBorder(new EmptyBorder(8, 0, 0, 4));
+            p.add(total, BorderLayout.SOUTH);
         }
         return card(p);
     }
@@ -398,9 +431,6 @@ public class BookingDetailDialog extends JDialog {
         p.setOpaque(false);
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBorder(new EmptyBorder(12, 0, 0, 0));
-
-        p.add(buildHistory(d));
-        p.add(Box.createVerticalStrut(8));
 
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         row.setOpaque(false);
@@ -511,7 +541,7 @@ public class BookingDetailDialog extends JDialog {
             ReceiptPdfGenerator.generate(receiptData(d), pdf);
             try (PDDocument document = PDDocument.load(pdf)) {
                 PrinterJob job = PrinterJob.getPrinterJob();
-                job.setJobName("TRI-MAX booking receipt #" + d.bookingId);
+                job.setJobName("JAIMILA booking receipt #" + d.bookingId);
                 job.setPageable(new PDFPageable(document));
                 if (!job.printDialog()) return;
                 job.print();
@@ -561,6 +591,32 @@ public class BookingDetailDialog extends JDialog {
                 BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(12, 14, 12, 14)));
         c.add(inner, BorderLayout.CENTER);
         return c;
+    }
+
+    // =====================================================
+    // CHANGING THE ORDER (sql/20261029_03)
+    // =====================================================
+
+    /** Edit order is offered while the booking is not finished yet and the server has the function. */
+    static boolean canEditOrder(BookingService.Detail d) {
+        return d.itemsSignature != null && !d.items.isEmpty()
+                && (BookingStatus.PENDING.equals(d.status) || BookingStatus.CONFIRMED.equals(d.status)
+                    || BookingStatus.IN_PROGRESS.equals(d.status));
+    }
+
+    private void editOrder() {
+        if (busy) return;
+        EditOrderDialog.Result r = EditOrderDialog.open(this, detail);
+        if (r == null) return;
+        if (r.change != null && r.change.changed) {
+            notice = "Order changed" + (r.change.changes == null ? "" : ": " + r.change.changes)
+                    + (r.change.oldTotal == null || r.change.newTotal == null ? ""
+                       : ". Total " + Theme.money(r.change.oldTotal) + " \u2192 " + Theme.money(r.change.newTotal) + ".");
+        } else if (r.conflict != null) {
+            notice = null;
+        }
+        if (onChanged != null) onChanged.run();
+        load();   // show what the database holds now
     }
 
     // =====================================================
@@ -661,6 +717,8 @@ public class BookingDetailDialog extends JDialog {
         if ("booking.assign_driver".equals(action)) return "Driver";
         if ("booking.create".equals(action)) return "Created";
         if ("booking.delivery_status".equals(action)) return "Delivery";
+        if ("booking.items_change".equals(action)) return "Order changed";
+        if ("booking.order_via".equals(action)) return "Order taken";
         return action;
     }
 
@@ -805,5 +863,38 @@ public class BookingDetailDialog extends JDialog {
                 BorderFactory.createLineBorder(plain ? Theme.BORDER : base),
                 new EmptyBorder(6, 14, 6, 14)));
         return b;
+    }
+
+    /** The scrolling part: as wide as the window, always as tall as its content (never squeezed). */
+    private static final class FullHeightPage extends JPanel implements Scrollable {
+        FullHeightPage() {
+            super(new BorderLayout());
+            setOpaque(false);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 24;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return Math.max(24, visible.height - 48);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }

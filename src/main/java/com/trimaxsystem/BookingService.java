@@ -172,6 +172,10 @@ public class BookingService {
 
     /** One product line of a booking. */
     public static class Line {
+        /** The product (null for a line whose product row is gone; such a booking cannot be edited). */
+        public Integer productId;
+        /** The product name as it is now, without the " (half case)" added to {@link #product}. */
+        public String productName;
         /** The product name; " (half case)" is added for a half case line. */
         public String product;
         /** A half case line (sql/20261028_07): the price is the half case's and it took 0.5 off the stock each. */
@@ -248,6 +252,12 @@ public class BookingService {
         public Double visitLatitude, visitLongitude;
         public Timestamp visitTakenAt;
 
+        /**
+         * Fingerprint of the status and the lines when this was loaded (sql/20261029_03); the order can only be
+         * changed with it, so a change made meanwhile by someone else is refused. Null on an older server.
+         */
+        public String itemsSignature;
+
         public boolean hasVisitPhoto() {
             return OrderVia.VISIT.equals(orderVia) && visitPhotoPath != null;
         }
@@ -298,7 +308,7 @@ public class BookingService {
         // 20261027_04 / 20261028_07
         String lines = "SELECT p.product_name, bi.quantity, bi.unit_price, bi.subtotal, "
                 + "coalesce((to_jsonb(bi) ->> 'discount_per_unit')::numeric, 0), "
-                + "coalesce(to_jsonb(bi) ->> 'unit', 'WHOLE') = 'HALF' "
+                + "coalesce(to_jsonb(bi) ->> 'unit', 'WHOLE') = 'HALF', p.product_id "
                 + "FROM booking_items bi LEFT JOIN products p ON p.product_id = bi.product_id "
                 + "WHERE bi.booking_id = ? ORDER BY bi.item_id";
 
@@ -333,6 +343,9 @@ public class BookingService {
                         l.subtotal = rs.getBigDecimal(4);
                         l.discountPerUnit = rs.getBigDecimal(5);
                         l.half = rs.getBoolean(6);
+                        int pid = rs.getInt(7);
+                        l.productId = rs.wasNull() ? null : pid;
+                        l.productName = l.product;
                         if (l.half) l.product = (l.product == null ? "(deleted product)" : l.product) + " (half case)";
                         d.items.add(l);
                     }
@@ -409,6 +422,16 @@ public class BookingService {
                         d.visitLongitude = (Double) rs.getObject(4);
                         d.visitTakenAt = rs.getTimestamp(5);
                     }
+                }
+            }
+            if (Db.bookingEditReady()) {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT trimax_private.booking_items_signature(?)")) {
+                    ps.setInt(1, bookingId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) d.itemsSignature = rs.getString(1);
+                    }
+                } catch (SQLException e) {
+                    d.itemsSignature = null;   // then "Edit order" is not offered
                 }
             }
             try {
@@ -603,6 +626,52 @@ public class BookingService {
             } finally {
                 conn.setAutoCommit(true);
             }
+        }
+    }
+
+    /** What the server says after an order change (sql/20261029_03). */
+    public static final class ItemsChange {
+        public boolean changed;
+        public BigDecimal oldTotal, newTotal;
+        public String changes;
+    }
+
+    /**
+     * Replaces the booking's lines with {@code itemsJson} ([{"product_id", "unit", "quantity"}, ...]) through
+     * trimax_private.update_booking_items: Admin re-checked, only Pending / Confirmed / In Progress, refused if the
+     * booking changed since {@code expectedSignature} was read; stock moves by the difference and the totals
+     * are recomputed, all in one transaction, audited.
+     */
+    public static ItemsChange updateItems(int bookingId, String expectedSignature, String itemsJson, String note)
+            throws Db.Failure, ConflictException {
+        String admin = Db.admin();
+        // MATERIALIZED: the function runs exactly once; its answer is then read field by field
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "WITH r AS MATERIALIZED (SELECT trimax_private.update_booking_items(?, ?, ?, ?::jsonb, ?) AS j) "
+                             + "SELECT (j ->> 'changed')::boolean, (j ->> 'old_total')::numeric, "
+                             + "(j ->> 'total_amount')::numeric, j ->> 'changes' FROM r")) {
+            ps.setString(1, admin);
+            ps.setInt(2, bookingId);
+            ps.setString(3, expectedSignature);
+            ps.setString(4, itemsJson);
+            ps.setString(5, note == null || note.isBlank() ? null : note.trim());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                ItemsChange c = new ItemsChange();
+                c.changed = rs.getBoolean(1);
+                c.oldTotal = rs.getBigDecimal(2);
+                c.newTotal = rs.getBigDecimal(3);
+                c.changes = rs.getString(4);
+                return c;
+            }
+        } catch (SQLException e) {
+            Db.Failure f = Db.failure(e, "The order was NOT changed", Db.UPDATE_29_BOOKING_EDIT);
+            // the booking changed after it was opened: the window reloads it
+            if ("TM409".equals(e.getSQLState()) && f.getMessage().startsWith("This booking was changed")) {
+                throw new ConflictException(f.getMessage());
+            }
+            throw f;
         }
     }
 }

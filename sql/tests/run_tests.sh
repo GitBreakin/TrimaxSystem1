@@ -321,4 +321,15 @@ rm -f "/tmp/$DB.56.log"
 echo "== Visit or Text / Call: rollback after bookings use it is refused and changes nothing"
 if psql_owner -f 20261029_98_rollback_booking_order_via.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although bookings use it"; exit 1; fi
 check "select to_regprocedure('public.trimax_agent_create_booking_v2(uuid,text,text,text,double precision,double precision,jsonb,text,text,text,text,double precision,double precision,timestamptz)') is not null and exists (select 1 from bookings where order_via = 'VISIT' and visit_photo_path is not null)" "refused rollback left the function and the recorded visits"
+echo "== Booking order editing and driver summary: rollback puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_owner -f 20261029_97_rollback_booking_edit_and_driver_summary.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private'))" "rollback puts back every function exactly (the 3 new ones gone)"
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_su -d "$DB" -f tests/57_booking_edit_tests.sql > "/tmp/$DB.57.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL BOOKING EDIT/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.57.log"
+grep -q '^ALL BOOKING EDIT SQL TESTS PASSED' "/tmp/$DB.57.log" || { echo "FAIL booking edit tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.57.log"
 echo "ALL DATABASE TESTS PASSED"

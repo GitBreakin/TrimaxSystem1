@@ -64,6 +64,16 @@ public class BookingsPanel extends JPanel {
     private final JTextField txtTo = new JTextField(9);
     private final JLabel lblFilterError = new JLabel(" ");
     private final JLabel lblActive = new JLabel(" ");
+    /** Totals of the whole filtered list (all pages): amount booked, and what the drivers delivered. */
+    private final JLabel lblTotals = new JLabel(" ");
+    /** Status filter entry: Completed, or marked delivered by the driver (dates then mean the delivery day). */
+    static final String DELIVERED_FILTER = "Delivered (by the driver)";
+    /**
+     * When a booking was delivered: the driver's "Delivered" time, else when it was completed (completed_at read
+     * through to_jsonb so this also works before 20261027_01).
+     */
+    static final String DELIVERED_AT_SQL = "coalesce(CASE WHEN b.delivery_status = 'DELIVERED' THEN b.delivery_status_at END, "
+            + "(to_jsonb(b) ->> 'completed_at')::timestamptz, b.delivery_status_at, b.transc_date)";
 
     // ---------- table + states ----------
     private final DefaultTableModel model = new DefaultTableModel(null, COLS) {
@@ -102,12 +112,14 @@ public class BookingsPanel extends JPanel {
         String search = "";
         String status = null;              // null = any
         String driverUsername = null;      // null = any
+        String driverLabel = null;         // the driver as the filter shows it
         boolean unassignedOnly = false;
+        boolean delivered = false;         // DELIVERED_FILTER: the From / To dates are then delivery days
         LocalDate from, to;
 
         boolean any() {
             return !search.isEmpty() || status != null || driverUsername != null || unassignedOnly
-                    || from != null || to != null;
+                    || delivered || from != null || to != null;
         }
     }
 
@@ -132,6 +144,9 @@ public class BookingsPanel extends JPanel {
     private static final class Result {
         long total;
         List<Object[]> rows = new ArrayList<>();
+        /** Over every page of the filtered list: amount (cancelled bookings not counted), and delivered. */
+        BigDecimal amount = BigDecimal.ZERO, deliveredAmount = BigDecimal.ZERO;
+        long deliveredCount;
     }
 
     public BookingsPanel() {
@@ -166,6 +181,9 @@ public class BookingsPanel extends JPanel {
         txtTo.setToolTipText("YYYY-MM-DD, e.g. 2026-10-31 (Manila time)");
         cmbStatus.addItem("All statuses");
         for (String s : BookingStatus.ALL) cmbStatus.addItem(s);
+        cmbStatus.addItem(DELIVERED_FILTER);
+        cmbStatus.setToolTipText("\"" + DELIVERED_FILTER + "\": Completed, or marked delivered on the driver's phone. "
+                + "From / To then mean the day it was delivered.");
         cmbDriver.addItem(new DriverItem(null, "All drivers", false));
         cmbDriver.addItem(new DriverItem(null, "Unassigned", true));
 
@@ -209,6 +227,12 @@ public class BookingsPanel extends JPanel {
         JPanel row3 = flow();
         row3.add(lblFilterError);
         row3.add(lblActive);
+        lblTotals.setFont(Theme.NAV_ON);
+        lblTotals.setForeground(Theme.TEXT);
+        lblTotals.setToolTipText("For every booking that matches the filters (all pages). Choose a driver, and "
+                + "\"" + DELIVERED_FILTER + "\" with From / To, to see how much one driver delivered on those days.");
+        JPanel row4 = flow();
+        row4.add(lblTotals);
 
         JPanel card = new JPanel();
         card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
@@ -218,6 +242,7 @@ public class BookingsPanel extends JPanel {
         card.add(row1);
         card.add(row2);
         card.add(row3);
+        card.add(row4);
         return card;
     }
 
@@ -419,12 +444,14 @@ public class BookingsPanel extends JPanel {
         if (search.startsWith("#")) search = search.substring(1).trim();
         f.search = search;
 
-        if (cmbStatus.getSelectedIndex() > 0) f.status = (String) cmbStatus.getSelectedItem();
+        if (DELIVERED_FILTER.equals(cmbStatus.getSelectedItem())) f.delivered = true;
+        else if (cmbStatus.getSelectedIndex() > 0) f.status = (String) cmbStatus.getSelectedItem();
 
         DriverItem d = (DriverItem) cmbDriver.getSelectedItem();
         if (d != null) {
             f.unassignedOnly = d.unassigned;
             f.driverUsername = d.username;
+            f.driverLabel = d.username == null ? null : d.label;
         }
 
         try {
@@ -475,10 +502,12 @@ public class BookingsPanel extends JPanel {
         List<String> parts = new ArrayList<>();
         if (!f.search.isEmpty()) parts.add("search \"" + f.search + "\"");
         if (f.status != null) parts.add("status " + f.status);
+        if (f.delivered) parts.add("delivered");
         if (f.unassignedOnly) parts.add("unassigned");
         if (f.driverUsername != null) parts.add("driver " + f.driverUsername);
-        if (f.from != null) parts.add("from " + f.from);
-        if (f.to != null) parts.add("to " + f.to);
+        String day = f.delivered ? "delivered " : "";
+        if (f.from != null) parts.add(day + "from " + f.from);
+        if (f.to != null) parts.add(day + "to " + f.to);
         lblActive.setText("Active filters: " + String.join(", ", parts));
     }
 
@@ -533,6 +562,8 @@ public class BookingsPanel extends JPanel {
                     }
                     refreshedAt = java.time.LocalTime.now(Theme.BUSINESS_TZ).format(CLOCK);
                     updateFooter(r.rows.size());
+                    lblTotals.setText(totalsText(r.total, r.amount, r.deliveredCount, r.deliveredAmount,
+                            f.driverLabel, f.unassignedOnly, f.delivered));
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     if (quiet && model.getRowCount() > 0) {
@@ -545,6 +576,7 @@ public class BookingsPanel extends JPanel {
                     }
                     totalRows = 0;
                     model.setRowCount(0);
+                    lblTotals.setText(" ");
                     showMessage("Could not load bookings: " + cause.getMessage(), true);
                     updateFooter(0);
                     ex.printStackTrace();
@@ -597,40 +629,20 @@ public class BookingsPanel extends JPanel {
     }
 
     private Result query(Filters f, int pageNo, int sc, boolean asc) throws SQLException {
-        StringBuilder where = new StringBuilder(" WHERE 1=1");
-        List<Object> params = new ArrayList<>();
-
-        if (!f.search.isEmpty()) {
-            where.append(" AND (b.booking_id::text ILIKE ? OR c.client_name ILIKE ? OR u.name ILIKE ? OR u.username ILIKE ?)");
-            String like = "%" + f.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-            for (int i = 0; i < 4; i++) params.add(like);
-        }
-        if (f.status != null) {
-            where.append(" AND b.status = ?");
-            params.add(f.status);
-        }
-        if (f.unassignedOnly) {
-            where.append(" AND b.driver_username IS NULL");
-        } else if (f.driverUsername != null) {
-            where.append(" AND b.driver_username = ?");
-            params.add(f.driverUsername);
-        }
-        if (f.from != null) {
-            where.append(" AND (b.transc_date AT TIME ZONE '" + TZ_SQL + "')::date >= ?");
-            params.add(java.sql.Date.valueOf(f.from));
-        }
-        if (f.to != null) {
-            where.append(" AND (b.transc_date AT TIME ZONE '" + TZ_SQL + "')::date <= ?");
-            params.add(java.sql.Date.valueOf(f.to));
-        }
-
         Result r = new Result();
         try (Connection conn = DatabaseConnection.getConnection()) {
             // Without the mobile integration installed the Delivery column stays empty and sorts by booking.
             boolean mobile = MobileIntegration.isInstalled(conn);
+            List<Object> params = new ArrayList<>();
+            String where = where(f, mobile, params);
             boolean order = mobile && DeliveryOrder.isInstalled(conn);
             String sortSql = (sc == COL_DELIVERY && !mobile) || (sc == COL_ORDER && !order) ? SORT_SQL[COL_ID] : SORT_SQL[sc];
-            String countSql = "SELECT COUNT(*)" + FROM_WHERE_BASE + where;
+            String delivered = mobile
+                    ? "b.status <> 'Cancelled' AND (b.status = 'Completed' OR b.delivery_status = 'DELIVERED')"
+                    : "b.status = 'Completed'";
+            String countSql = "SELECT COUNT(*), COALESCE(SUM(b.total_amount) FILTER (WHERE b.status <> 'Cancelled'), 0), "
+                    + "COUNT(*) FILTER (WHERE " + delivered + "), "
+                    + "COALESCE(SUM(b.total_amount) FILTER (WHERE " + delivered + "), 0)" + FROM_WHERE_BASE + where;
             String dataSql = "SELECT b.booking_id, c.client_name, "
                     + "to_char(b.transc_date AT TIME ZONE '" + TZ_SQL + "', 'YYYY-MM-DD HH24:MI'), "
                     + "(SELECT COUNT(*) FROM booking_items bi WHERE bi.booking_id = b.booking_id) AS item_count, "
@@ -650,6 +662,9 @@ public class BookingsPanel extends JPanel {
                 try (ResultSet rs = ps.executeQuery()) {
                     rs.next();
                     r.total = rs.getLong(1);
+                    r.amount = rs.getBigDecimal(2);
+                    r.deliveredCount = rs.getLong(3);
+                    r.deliveredAmount = rs.getBigDecimal(4);
                 }
             }
             try (PreparedStatement ps = conn.prepareStatement(dataSql)) {
@@ -674,6 +689,58 @@ public class BookingsPanel extends JPanel {
             }
         }
         return r;
+    }
+
+    /**
+     * "This list: 43 bookings · ₱ 50,000.00   |   Delivered by Maria Santos: 12 · ₱ 24,500.00". The amount leaves
+     * out cancelled bookings; delivered = Completed or marked delivered by the driver.
+     */
+    static String totalsText(long count, BigDecimal amount, long deliveredCount, BigDecimal deliveredAmount,
+                             String driverLabel, boolean unassigned, boolean deliveredFilter) {
+        String who = driverLabel != null ? " by " + driverLabel : "";
+        String delivered = "Delivered" + who + ": " + deliveredCount + (deliveredCount == 1 ? " booking" : " bookings")
+                + "  \u00B7  " + Theme.money(deliveredAmount == null ? BigDecimal.ZERO : deliveredAmount);
+        if (deliveredFilter) return delivered;
+        String list = (unassigned ? "Unassigned" : "This list") + ": " + count + (count == 1 ? " booking" : " bookings")
+                + "  \u00B7  " + Theme.money(amount == null ? BigDecimal.ZERO : amount)
+                + (count > 0 ? " (cancelled not counted)" : "");
+        return unassigned ? list : list + "     |     " + delivered;
+    }
+
+    /** The WHERE clause for the filters; the values are added to params in order. */
+    private static String where(Filters f, boolean mobile, List<Object> params) {
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+
+        if (!f.search.isEmpty()) {
+            where.append(" AND (b.booking_id::text ILIKE ? OR c.client_name ILIKE ? OR u.name ILIKE ? OR u.username ILIKE ?)");
+            String like = "%" + f.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            for (int i = 0; i < 4; i++) params.add(like);
+        }
+        if (f.status != null) {
+            where.append(" AND b.status = ?");
+            params.add(f.status);
+        }
+        if (f.delivered) {
+            where.append(mobile ? " AND b.status <> 'Cancelled' AND (b.status = 'Completed' OR b.delivery_status = 'DELIVERED')"
+                                : " AND b.status = 'Completed'");
+        }
+        // Dates: the booking day; with "Delivered" the delivery day
+        String day = f.delivered && mobile ? DELIVERED_AT_SQL : "b.transc_date";
+        if (f.unassignedOnly) {
+            where.append(" AND b.driver_username IS NULL");
+        } else if (f.driverUsername != null) {
+            where.append(" AND b.driver_username = ?");
+            params.add(f.driverUsername);
+        }
+        if (f.from != null) {
+            where.append(" AND (" + day + " AT TIME ZONE '" + TZ_SQL + "')::date >= ?");
+            params.add(java.sql.Date.valueOf(f.from));
+        }
+        if (f.to != null) {
+            where.append(" AND (" + day + " AT TIME ZONE '" + TZ_SQL + "')::date <= ?");
+            params.add(java.sql.Date.valueOf(f.to));
+        }
+        return where.toString();
     }
 
     /** Binds the filter values; returns how many parameters were set. */
