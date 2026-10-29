@@ -10,7 +10,7 @@ Branches `feature/stage-b-db-baseline` (based on `feature/mobile-booking-integra
 | `_04` delivery proofs | **Applied 2026-10-25**, with the owner's approval |
 | `_05` admin photo tickets + Edge Function `trimax-admin-media` | **Applied and deployed 2026-10-25**, with the owner's approval |
 | `_06` product images + Edge Function `trimax-admin-media` v2 (upload/delete) | **Applied and deployed 2026-10-26**, with the owner's approval |
-| `_07` alert resolution (Stage G) | **Not applied.** Needs approval |
+| `_07` alert resolution (Stage G) | **Applied 2026-10-29 ~10:55** with the owner's approval (1 transaction), after all the later updates (it only adds 3 columns, 1 check, 1 index and `resolve_alert`; it replaces no function). Its revoke was widened to `anon`, `authenticated` and `service_role` first. Dry run on the local production-like copy: Desktop Notifications resolved a test alert, a second resolve was refused, the audit log has it. After: `resolve_alert` equals the dry run (`23128220…`), no API access, no row changed. Every database update in this repository is now applied |
 | `20261026_01` employee mobile sign-in + Edge Function `trimax-accounts` | **Applied and deployed 2026-10-26**, with the owner's approval (function v1 13:49; v2 15:31 adds the temporary first password, no database change) |
 | `20261027_01` products/stock/sales/payroll/profit, customer photos, agent discounts + Edge Function `trimax-admin-media` redeploy | **Applied 2026-10-27** with approval (3 transactions); `trimax-admin-media` v3 deployed |
 | `20261027_02` other expenses in net profit | **Applied 2026-10-27** with approval (1 transaction) |
