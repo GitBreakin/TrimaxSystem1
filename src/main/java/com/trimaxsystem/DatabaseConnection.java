@@ -5,17 +5,16 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.CodeSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Properties;
 
 public class DatabaseConnection {
-
-    private static final String[] FILE_LOCATIONS = {
-            "trimax.properties",
-            Paths.get(System.getProperty("user.home"), ".trimax", "trimax.properties").toString()
-    };
 
     private static volatile Properties fileProps;
     private static volatile String filePath;   // the trimax.properties that was read, or null
@@ -81,7 +80,10 @@ public class DatabaseConnection {
         if (value == null || value.isBlank()) {
             throw new SQLException("Database is not configured: set " + envName
                     + " or configure \"" + fileKey + "\" in trimax.properties. "
-                    + "Copy trimax.properties.example to trimax.properties and fill in your database settings.");
+                    + (filePath == null
+                       ? "No trimax.properties was found; put a filled-in copy of trimax.properties.example at "
+                         + userSettingsFile() + " (or next to the TRIMAX app)."
+                       : "Add it to " + filePath + "."));
         }
         return value.trim();
     }
@@ -92,8 +94,7 @@ public class DatabaseConnection {
         synchronized (DatabaseConnection.class) {
             if (fileProps != null) return fileProps;
             p = new Properties();
-            for (String location : FILE_LOCATIONS) {
-                Path path = Paths.get(location);
+            for (Path path : settingsLocations()) {
                 if (Files.isRegularFile(path)) {
                     try (InputStream in = Files.newInputStream(path)) {
                         p.load(in);
@@ -107,5 +108,54 @@ public class DatabaseConnection {
             fileProps = p;
             return p;
         }
+    }
+
+    /**
+     * Where trimax.properties is looked for, first found wins: the folder the app was started from, the app's own
+     * folder (next to the .exe or .jar, so an installed or double-clicked app finds it), then
+     * C:\Users\&lt;name&gt;\.trimax\trimax.properties. Environment variables still win over all of these.
+     */
+    static List<Path> settingsLocations() {
+        LinkedHashSet<Path> out = new LinkedHashSet<>();
+        out.add(Paths.get("trimax.properties").toAbsolutePath().normalize());
+        for (Path dir : appFolders()) out.add(dir.resolve("trimax.properties").toAbsolutePath().normalize());
+        out.add(userSettingsFile());
+        return new ArrayList<>(out);
+    }
+
+    /** C:\Users\&lt;name&gt;\.trimax\trimax.properties: the place that works however the app is started. */
+    static Path userSettingsFile() {
+        return Paths.get(System.getProperty("user.home"), ".trimax", "trimax.properties").toAbsolutePath().normalize();
+    }
+
+    /** The folder of the .exe (jpackage) and of the .jar or wrapped .exe this class was loaded from. */
+    private static List<Path> appFolders() {
+        List<Path> dirs = new ArrayList<>();
+        String exe = System.getProperty("jpackage.app-path");   // set by apps packaged with jpackage
+        if (exe != null && !exe.isBlank()) {
+            try {
+                Path dir = Paths.get(exe).toAbsolutePath().getParent();
+                if (dir != null) dirs.add(dir);
+            } catch (RuntimeException ignored) {
+                // not a usable path: skip it
+            }
+        }
+        try {
+            CodeSource cs = DatabaseConnection.class.getProtectionDomain().getCodeSource();
+            if (cs != null && cs.getLocation() != null) {
+                Path code = Paths.get(cs.getLocation().toURI()).toAbsolutePath();
+                if (Files.isRegularFile(code) && code.getParent() != null) {   // a .jar or .exe, not an IDE's classes folder
+                    Path dir = code.getParent();
+                    dirs.add(dir);
+                    Path name = dir.getFileName();
+                    if (name != null && "app".equalsIgnoreCase(name.toString()) && dir.getParent() != null) {
+                        dirs.add(dir.getParent());                      // jpackage keeps the jar in <install>\app\
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // no code location (unusual class loader): the other places still apply
+        }
+        return dirs;
     }
 }
