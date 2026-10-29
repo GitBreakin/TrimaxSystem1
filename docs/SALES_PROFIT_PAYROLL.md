@@ -127,7 +127,7 @@ trend). Empty periods show an empty state.
 - History filters: employee, status, and the range in which the period ends. The summary shows totals
   for the filtered records.
 
-### Employees without an app account (database update `20261029_01`)
+### Employees without an app account (database update `20261029_01`, applied to production 2026-10-29)
 
 Owner's request of 2026-10-29: helpers, cashiers, guards and others are paid too, not only agents and drivers.
 Their pay must lower the profit as well.

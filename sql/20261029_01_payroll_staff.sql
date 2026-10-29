@@ -11,7 +11,7 @@
 -- Payroll already lowers net profit in Sales & Profit (by the end of its pay period); that is unchanged.
 --
 -- ORDER: after 20261027_01. Re-runnable. Rollback: 20261029_99_rollback_payroll_staff.sql.
--- NOT APPLIED to production. Needs the owner's approval first.
+-- APPLIED to production 2026-10-29 09:05 (Asia/Manila) with the owner's approval (1 transaction).
 -- =====================================================================================================
 
 begin;
