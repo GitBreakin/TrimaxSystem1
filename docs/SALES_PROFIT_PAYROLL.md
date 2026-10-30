@@ -149,6 +149,14 @@ payroll record is for. A record is for an account or for an employee without one
 employee; the 14-argument version older Desktops call stays, and keeps a record's employee when it is edited.
 Rollback: `sql/20261029_99_rollback_payroll_staff.sql`.
 
+### Days worked from attendance (database update `20261030_01`)
+
+Basic pay can be worked out as **days worked × daily rate**:
+- The days of agents and drivers come from their Start / End duty (8 hours = 1 day).
+- The days of employees without an app account come from **Attendance → Employees without an app...**, where the Admin marks Present / Half day / Absent.
+
+See docs/PAYROLL_ATTENDANCE.md.
+
 ## Other expenses (Expenses, database update `20261027_02`)
 
 Owner's request of 2026-10-27: business costs that are not payroll and not stock lower net profit.

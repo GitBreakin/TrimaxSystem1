@@ -332,4 +332,18 @@ psql_su -d "$DB" -f tests/57_booking_edit_tests.sql > "/tmp/$DB.57.log" 2>&1 || 
 sed -n 's/^.*NOTICE:  //p; /ALL BOOKING EDIT/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.57.log"
 grep -q '^ALL BOOKING EDIT SQL TESTS PASSED' "/tmp/$DB.57.log" || { echo "FAIL booking edit tests (see above)"; exit 1; }
 rm -f "/tmp/$DB.57.log"
+echo "== Payroll from attendance: rollback while unused puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_owner -f 20261030_99_rollback_payroll_attendance.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and to_regclass('public.staff_attendance') is null and not exists (select 1 from information_schema.columns where table_name = 'payroll_records' and column_name in ('days_worked', 'daily_rate'))" "rollback puts back every function exactly and removes the table and the 2 columns"
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_su -d "$DB" -f tests/58_payroll_attendance_tests.sql > "/tmp/$DB.58.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL ATTENDANCE/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.58.log"
+grep -q '^ALL PAYROLL ATTENDANCE SQL TESTS PASSED' "/tmp/$DB.58.log" || { echo "FAIL payroll attendance tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.58.log"
+echo "== Payroll from attendance: rollback after attendance is recorded is refused and changes nothing"
+if psql_owner -f 20261030_99_rollback_payroll_attendance.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although attendance is recorded"; exit 1; fi
+check "select to_regclass('public.staff_attendance') is not null and exists (select 1 from staff_attendance) and exists (select 1 from payroll_records where days_worked is not null)" "refused rollback left the attendance and the payroll days"
 echo "ALL DATABASE TESTS PASSED"

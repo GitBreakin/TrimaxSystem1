@@ -40,7 +40,8 @@ import javax.swing.table.DefaultTableModel;
 /**
  * Attendance: every Start duty / End duty that agents and drivers record in the mobile app, with the
  * server's date and time, where they were, how long the shift lasted, and the attendance photo.
- * Read-only; times are Asia/Manila.
+ * Read-only; times are Asia/Manila. "Employees without an app..." opens the Admin-marked attendance of the
+ * other employees (StaffAttendanceDialog).
  */
 public class AttendancePanel extends JPanel {
 
@@ -94,6 +95,19 @@ public class AttendancePanel extends JPanel {
         search.setToolTipText("Name or username");
         filters.add(search);
         filters.add(refresh);
+        // Employees without an app account: the Admin marks their days (sql/20261030_01)
+        JButton staff = UiKit.secondaryButton("Employees without an app...");
+        staff.setToolTipText("Mark Present / Half day / Absent for helpers, cashiers... (counted in Payroll)");
+        staff.addActionListener(e -> {
+            if (!Db.payrollAttendanceReady()) {
+                javax.swing.JOptionPane.showMessageDialog(this,
+                        Db.notReadyMessage("Attendance for employees without an app", Db.UPDATE_30_PAYROLL_ATTENDANCE),
+                        "Attendance", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            StaffAttendanceDialog.open(javax.swing.SwingUtilities.getWindowAncestor(this));
+        });
+        filters.add(staff);
         period.setSelectedIndex(1);
 
         onDutyChip.setFont(new Font("SansSerif", Font.BOLD, 13));

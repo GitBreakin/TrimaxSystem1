@@ -147,6 +147,8 @@ final class PayrollService {
         String username, name, status, method, notes, createdBy, updatedBy, voidedBy, voidReason;
         LocalDate start, end, paidAt;
         BigDecimal basic, allowances, deductions, net;
+        /** Days worked and pay per day saved with the record (20261030_01); null when not given. */
+        BigDecimal daysWorked, dailyRate;
         Timestamp createdAt, updatedAt, voidedAt;
 
         String period() {
@@ -176,9 +178,51 @@ final class PayrollService {
     static long save(Long id, UUID requestId, String username, Long staffId, String name, LocalDate start, LocalDate end,
                      BigDecimal basic, BigDecimal allowances, BigDecimal deductions, boolean paid, LocalDate paidAt,
                      String method, String notes) throws Db.Failure {
+        return save(id, requestId, username, staffId, name, start, end, basic, allowances, deductions, paid, paidAt,
+                method, notes, null, null, false);
+    }
+
+    /**
+     * As above, plus the days worked and the daily rate (20261030_01), saved in the same transaction as the
+     * record. withDays false: leave them as they are (a server without the update, or nothing to save).
+     */
+    static long save(Long id, UUID requestId, String username, Long staffId, String name, LocalDate start, LocalDate end,
+                     BigDecimal basic, BigDecimal allowances, BigDecimal deductions, boolean paid, LocalDate paidAt,
+                     String method, String notes, BigDecimal days, BigDecimal rate, boolean withDays) throws Db.Failure {
         String admin = Db.admin();
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(staffId != null
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long saved = saveRecord(conn, admin, id, requestId, username, staffId, name, start, end, basic, allowances,
+                        deductions, paid, paidAt, method, notes);
+                if (withDays) {
+                    try (PreparedStatement ps = conn.prepareStatement("select trimax_private.set_payroll_attendance(?, ?, ?, ?)")) {
+                        ps.setString(1, admin);
+                        ps.setLong(2, saved);
+                        ps.setBigDecimal(3, days);
+                        ps.setBigDecimal(4, rate);
+                        ps.executeQuery().close();
+                    }
+                }
+                conn.commit();
+                return saved;
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw Db.failure(e, "The payroll record was not saved",
+                    withDays ? Db.UPDATE_30_PAYROLL_ATTENDANCE : staffId != null ? Db.UPDATE_29_PAYROLL_STAFF : Db.UPDATE_27);
+        }
+    }
+
+    private static long saveRecord(Connection conn, String admin, Long id, UUID requestId, String username, Long staffId,
+                                   String name, LocalDate start, LocalDate end, BigDecimal basic, BigDecimal allowances,
+                                   BigDecimal deductions, boolean paid, LocalDate paidAt, String method, String notes)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(staffId != null
                      ? "select trimax_private.save_payroll(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                      : "select trimax_private.save_payroll(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             ps.setString(1, admin);
@@ -200,9 +244,106 @@ final class PayrollService {
                 rs.next();
                 return rs.getLong(1);
             }
-        } catch (SQLException e) {
-            throw Db.failure(e, "The payroll record was not saved", staffId != null ? Db.UPDATE_29_PAYROLL_STAFF : Db.UPDATE_27);
         }
+    }
+
+    /** Days worked in a pay period, from attendance (trimax_private.attendance_days, 20261030_01). */
+    static final class AttendanceDays {
+        boolean fromDuty;           // an agent or driver (Start / End duty in the app); else Admin-marked attendance
+        BigDecimal days = BigDecimal.ZERO, hours = BigDecimal.ZERO;
+        int dutyDays, openDays, present, halfDays, absent;
+        String openDates;           // "2025-02-08, 2025-02-10"
+
+        /** "5 days (41 h on 8 duty days; 2 days without End duty: 2025-02-08, 2025-02-10, not counted)" */
+        String summary() {
+            String d = Money.qty(days) + (days.compareTo(BigDecimal.ONE) == 0 ? " day" : " days");
+            if (fromDuty) {
+                return d + " (" + Money.qty(hours) + " h on " + dutyDays + (dutyDays == 1 ? " duty day" : " duty days")
+                        + (openDays > 0 ? "; " + openDays + (openDays == 1 ? " day" : " days") + " without End duty, not counted: "
+                           + openDates : "") + "; 8 h = 1 day)";
+            }
+            return d + " (" + present + " present, " + halfDays + (halfDays == 1 ? " half day, " : " half days, ")
+                    + absent + " absent)";
+        }
+    }
+
+    static AttendanceDays attendanceDays(String username, Long staffId, LocalDate from, LocalDate to) throws Db.Failure {
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "with r as materialized (select trimax_private.attendance_days(?, ?, ?, ?) as j) "
+                             + "select j ->> 'source', (j ->> 'days')::numeric, (j ->> 'hours')::numeric, "
+                             + "coalesce((j ->> 'duty_days')::int, 0), coalesce((j ->> 'open_days')::int, 0), "
+                             + "coalesce((j ->> 'present')::int, 0), coalesce((j ->> 'half_days')::int, 0), "
+                             + "coalesce((j ->> 'absent')::int, 0), "
+                             + "(select string_agg(d, ', ') from jsonb_array_elements_text(coalesce(j -> 'open_dates', '[]')) d) from r")) {
+            ps.setString(1, username);
+            if (staffId == null) ps.setNull(2, Types.BIGINT); else ps.setLong(2, staffId);
+            ps.setDate(3, Date.valueOf(from));
+            ps.setDate(4, Date.valueOf(to));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                AttendanceDays a = new AttendanceDays();
+                a.fromDuty = "duty".equals(rs.getString(1));
+                a.days = InventoryService.qtyOf(rs.getBigDecimal(2));
+                a.hours = rs.getBigDecimal(3) == null ? BigDecimal.ZERO : rs.getBigDecimal(3);
+                a.dutyDays = rs.getInt(4);
+                a.openDays = rs.getInt(5);
+                a.present = rs.getInt(6);
+                a.halfDays = rs.getInt(7);
+                a.absent = rs.getInt(8);
+                a.openDates = rs.getString(9);
+                return a;
+            }
+        } catch (SQLException e) {
+            throw Db.failure(e, "Could not count the days worked", Db.UPDATE_30_PAYROLL_ATTENDANCE);
+        }
+    }
+
+    /** The daily rate on this employee's latest payroll record that has one (to suggest it again), or null. */
+    static BigDecimal lastDailyRate(String username, Long staffId) {
+        if (username == null && staffId == null) return null;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select (to_jsonb(r) ->> 'daily_rate')::numeric from payroll_records r "
+                             + "where r.status <> 'VOID' and (to_jsonb(r) ->> 'daily_rate') is not null and "
+                             + (staffId != null ? "(to_jsonb(r) ->> 'staff_id')::bigint = ? " : "r.employee_username = ? ")
+                             + "order by r.period_end desc, r.payroll_id desc limit 1")) {
+            if (staffId != null) ps.setLong(1, staffId); else ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getBigDecimal(1) : null;
+            }
+        } catch (SQLException e) {
+            return null;   // only a suggestion
+        }
+    }
+
+    /** Days worked as typed: blank = none; 0 to 366 with at most 2 decimals (half days are 0.5). */
+    static BigDecimal parseDays(String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) return null;
+        BigDecimal v;
+        try {
+            v = new BigDecimal(t);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Days worked must be a number, for example 11 or 11.5.");
+        }
+        if (v.signum() < 0 || v.compareTo(BigDecimal.valueOf(366)) > 0 || v.stripTrailingZeros().scale() > 2) {
+            throw new IllegalArgumentException("Days worked must be from 0 to 366, with at most 2 decimals.");
+        }
+        return v;
+    }
+
+    /** The payroll list's "Days x rate": "11.5 x ₱600.00", "11.5 days", or "" when not given. */
+    static String daysText(BigDecimal days, BigDecimal rate) {
+        if (days == null && rate == null) return "";
+        if (days == null) return "x " + Money.peso(rate);
+        return Money.qty(days) + (rate == null ? (days.compareTo(BigDecimal.ONE) == 0 ? " day" : " days") : " x " + Money.peso(rate));
+    }
+
+    /** Basic pay = days x daily rate, to the centavo; null when either is missing. */
+    static BigDecimal basicFromDays(BigDecimal days, BigDecimal rate) {
+        if (days == null || rate == null) return null;
+        return days.multiply(rate).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     static void voidRecord(long id, String reason) throws Db.Failure {
@@ -255,7 +396,9 @@ final class PayrollService {
         String sql = "select payroll_id, employee_username, employee_name, period_start, period_end, basic_pay, allowances, "
                 + "deductions, net_pay, status, paid_at, payment_method, notes, created_by, created_at, updated_by, updated_at, "
                 // staff_id read through to_jsonb so the list also works on a server without 20261029_01
-                + "voided_by, voided_at, void_reason, (to_jsonb(r) ->> 'staff_id')::bigint from payroll_records r " + where
+                + "voided_by, voided_at, void_reason, (to_jsonb(r) ->> 'staff_id')::bigint, "
+                // days_worked / daily_rate read through to_jsonb too (20261030_01)
+                + "(to_jsonb(r) ->> 'days_worked')::numeric, (to_jsonb(r) ->> 'daily_rate')::numeric from payroll_records r " + where
                 + "order by r.period_end desc, lower(r.employee_name), r.payroll_id desc";
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -286,6 +429,8 @@ final class PayrollService {
                     r.voidReason = rs.getString(20);
                     long sid = rs.getLong(21);
                     r.staffId = rs.wasNull() ? null : sid;
+                    r.daysWorked = rs.getBigDecimal(22);
+                    r.dailyRate = rs.getBigDecimal(23);
                     page.rows.add(r);
                     if (!"VOID".equals(r.status)) {
                         page.count++;
@@ -299,5 +444,86 @@ final class PayrollService {
             throw Db.failure(e, "Could not load the payroll");
         }
         return page;
+    }
+
+    // ------------------------------------------------------------------------------------ staff attendance (20261030_01)
+
+    static final String PRESENT = "PRESENT", HALF_DAY = "HALF_DAY", ABSENT = "ABSENT";
+
+    static String attendanceLabel(String status) {
+        if (PRESENT.equals(status)) return "Present";
+        if (HALF_DAY.equals(status)) return "Half day";
+        if (ABSENT.equals(status)) return "Absent";
+        return "";
+    }
+
+    /** One employee without an app account on one day. */
+    static final class StaffDay {
+        long staffId;
+        String name, position, status, note;   // status null = not marked
+        boolean active;
+        /** Days worked in the month of that day, up to that day (Present 1, Half day 0.5). */
+        BigDecimal monthDays = BigDecimal.ZERO;
+    }
+
+    /**
+     * The employees without an app account for one day: everyone still working here, plus anyone who has a mark on
+     * that day; with their mark and their days so far that month.
+     */
+    static List<StaffDay> staffDay(LocalDate day) throws Db.Failure {
+        List<StaffDay> out = new ArrayList<>();
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select s.staff_id, s.name, s.position, s.active, a.status, a.note, "
+                             + "(select coalesce(sum(case m.status when 'PRESENT' then 1 when 'HALF_DAY' then 0.5 else 0 end), 0) "
+                             + "   from staff_attendance m where m.staff_id = s.staff_id "
+                             + "    and m.work_date between date_trunc('month', ?::date)::date and ?::date) "
+                             + "from payroll_staff s left join staff_attendance a on a.staff_id = s.staff_id and a.work_date = ? "
+                             + "where s.active or a.staff_id is not null order by lower(s.name), s.staff_id")) {
+            ps.setDate(1, Date.valueOf(day));
+            ps.setDate(2, Date.valueOf(day));
+            ps.setDate(3, Date.valueOf(day));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    StaffDay d = new StaffDay();
+                    d.staffId = rs.getLong(1);
+                    d.name = rs.getString(2);
+                    d.position = rs.getString(3);
+                    d.active = rs.getBoolean(4);
+                    d.status = rs.getString(5);
+                    d.note = rs.getString(6);
+                    d.monthDays = InventoryService.qtyOf(rs.getBigDecimal(7));
+                    out.add(d);
+                }
+            }
+        } catch (SQLException e) {
+            throw Db.failure(e, "Could not load the attendance", Db.UPDATE_30_PAYROLL_ATTENDANCE);
+        }
+        return out;
+    }
+
+    /** Saves the marks of one day (status null clears it). @return how many marks changed. */
+    static int saveStaffDay(LocalDate day, List<StaffDay> rows) throws Db.Failure {
+        String admin = Db.admin();
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < rows.size(); i++) {
+            StaffDay r = rows.get(i);
+            if (i > 0) json.append(',');
+            json.append("{\"staff_id\":").append(r.staffId).append(",\"status\":").append(Db.json(r.status))
+                .append(",\"note\":").append(Db.json(r.note == null || r.note.isBlank() ? null : r.note.trim())).append('}');
+        }
+        json.append(']');
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("select trimax_private.save_staff_attendance(?, ?, ?::jsonb)")) {
+            ps.setString(1, admin);
+            ps.setDate(2, Date.valueOf(day));
+            ps.setString(3, json.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw Db.failure(e, "The attendance was not saved", Db.UPDATE_30_PAYROLL_ATTENDANCE);
+        }
     }
 }

@@ -30,7 +30,7 @@ public class PayrollPanel extends JPanel {
     private final JTextField from = new JTextField(9), to = new JTextField(9);
     private final JLabel kCount = kpi(), kTotal = kpi(), kPaid = kpi(), kUnpaid = kpi();
     private final DefaultTableModel model = new DefaultTableModel(new String[]{
-            "#", "Employee", "Pay period", "Basic", "Allowances", "Deductions", "Net pay", "Status", "Paid on"}, 0) {
+            "#", "Employee", "Pay period", "Basic", "Allowances", "Deductions", "Net pay", "Status", "Paid on", "Days x rate"}, 0) {
         @Override
         public boolean isCellEditable(int r, int c) {
             return false;
@@ -109,7 +109,7 @@ public class PayrollPanel extends JPanel {
                 s -> "Paid".equals(s) ? Theme.OK : "Unpaid".equals(s) ? Theme.WARN : Theme.MUTED));
         table.getColumnModel().getColumn(8).setCellRenderer(new UiKit.CellRenderer(SwingConstants.LEFT, false, false));
         UiKit.alignHeaders(table, 3, 4, 5, 6);
-        int[] widths = {50, 200, 190, 100, 100, 100, 110, 100, 110};
+        int[] widths = {50, 200, 190, 100, 100, 100, 110, 100, 110, 130};
         for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getSelectionModel().addListSelectionListener(e -> updateButtons());
         table.addMouseListener(new MouseAdapter() {
@@ -297,7 +297,8 @@ public class PayrollPanel extends JPanel {
                         rows.add(r);
                         model.addRow(new Object[]{r.id, r.name + (r.username == null ? "" : "  (" + r.username + ")"), r.period(),
                                 Money.plain(r.basic), Money.plain(r.allowances), Money.plain(r.deductions), Money.plain(r.net),
-                                PayrollService.statusLabel(r.status), r.paidAt == null ? "" : r.paidAt.toString()});
+                                PayrollService.statusLabel(r.status), r.paidAt == null ? "" : r.paidAt.toString(),
+                                PayrollService.daysText(r.daysWorked, r.dailyRate)});
                     }
                     cards.show(center, "table");
                     updateButtons();
@@ -382,6 +383,14 @@ public class PayrollPanel extends JPanel {
             JTextField start = new JTextField(10), end = new JTextField(10);
             JTextField basic = new JTextField(10), allow = new JTextField(10), ded = new JTextField(10);
             JLabel net = new JLabel(" ");
+            // Days worked from attendance x daily rate = basic pay (sql/20261030_01)
+            final boolean withDays = Db.payrollAttendanceReady();
+            JTextField days = new JTextField(6), rate = new JTextField(10);
+            JLabel att = new JLabel(" ");
+            JButton useAtt = UiKit.secondaryButton("Use attendance");
+            final PayrollService.AttendanceDays[] lastAtt = {null};
+            final int[] attSeq = {0};
+            final boolean[] daysTyped = {false}, filling = {false};
             JRadioButton unpaid = new JRadioButton("Unpaid", true), paid = new JRadioButton("Paid");
             ButtonGroup g = new ButtonGroup();
             g.add(unpaid);
@@ -392,7 +401,13 @@ public class PayrollPanel extends JPanel {
             for (String[] m : SalesService.METHODS) method.addItem(m[1]);
             JTextField notes = new JTextField(28);
             JLabel error = new JLabel(" ");
-            for (JTextField f : new JTextField[]{name, start, end, basic, allow, ded, paidOn, notes}) UiKit.styleField(f);
+            for (JTextField f : new JTextField[]{name, start, end, basic, allow, ded, paidOn, notes, days, rate}) UiKit.styleField(f);
+            att.setFont(Theme.SMALL);
+            att.setForeground(Theme.MUTED);
+            UiKit.placeholder(days, "0");
+            UiKit.placeholder(rate, "0.00");
+            days.setToolTipText("Days worked in the pay period. Filled in from attendance; you can change it.");
+            rate.setToolTipText("Pay per day. Basic pay becomes days worked x daily rate.");
             who.setFont(Theme.SUBTLE);
             method.setFont(Theme.SUBTLE);
             for (JRadioButton r : new JRadioButton[]{unpaid, paid}) {
@@ -438,6 +453,9 @@ public class PayrollPanel extends JPanel {
                     if (SalesService.METHODS[i][0].equals(rec.method)) method.setSelectedIndex(i + 1);
                 }
                 notes.setText(rec.notes == null ? "" : rec.notes);
+                if (rec.daysWorked != null) days.setText(Money.qty(rec.daysWorked));
+                if (rec.dailyRate != null) rate.setText(rec.dailyRate.toPlainString());
+                daysTyped[0] = rec.daysWorked != null;   // keep the saved days; "Use attendance" refreshes them
             }
 
             Runnable refresh = () -> {
@@ -463,6 +481,101 @@ public class PayrollPanel extends JPanel {
             paid.addActionListener(e -> refresh.run());
             for (JTextField f : new JTextField[]{basic, allow, ded}) f.getDocument().addDocumentListener(StockDialogs.listener(refresh));
             refresh.run();
+
+            // ---- days worked x daily rate -> basic pay; the days come from attendance
+            Runnable daysToBasic = () -> {
+                try {
+                    BigDecimal dd = PayrollService.parseDays(days.getText());
+                    BigDecimal rr = Money.parse(rate.getText(), "daily rate", true);
+                    BigDecimal b0 = PayrollService.basicFromDays(dd, rr);
+                    if (b0 != null) basic.setText(b0.toPlainString());
+                } catch (IllegalArgumentException ignored) {
+                    // shown when saving
+                }
+            };
+            days.getDocument().addDocumentListener(StockDialogs.listener(() -> {
+                if (!filling[0]) daysTyped[0] = true;
+                daysToBasic.run();
+            }));
+            rate.getDocument().addDocumentListener(StockDialogs.listener(daysToBasic));
+            Runnable fetchAttendance = () -> {
+                if (!withDays) return;
+                Object w = who.getSelectedItem();
+                PayrollService.Employee emp = w instanceof PayrollService.Employee ? (PayrollService.Employee) w : null;
+                final LocalDate ps, pe;
+                try {
+                    ps = LocalDate.parse(start.getText().trim());
+                    pe = LocalDate.parse(end.getText().trim());
+                } catch (DateTimeParseException ex) {
+                    att.setText("Enter the pay period to count the days worked.");
+                    return;
+                }
+                if (emp == null) {
+                    lastAtt[0] = null;
+                    useAtt.setEnabled(false);
+                    att.setText("No attendance for a typed name. Choose the employee from the list to count their days.");
+                    return;
+                }
+                if (pe.isBefore(ps) || pe.toEpochDay() - ps.toEpochDay() > 92) {
+                    att.setText("Check the pay period (at most 3 months).");
+                    return;
+                }
+                final int my = ++attSeq[0];
+                att.setText("Counting the days worked...");
+                useAtt.setEnabled(false);
+                final String u = emp.isStaff() ? null : emp.username;
+                final Long sid = emp.isStaff() ? emp.staffId : null;
+                new SwingWorker<Object[], Void>() {
+                    @Override
+                    protected Object[] doInBackground() throws Exception {
+                        return new Object[]{PayrollService.attendanceDays(u, sid, ps, pe), PayrollService.lastDailyRate(u, sid)};
+                    }
+
+                    @Override
+                    protected void done() {
+                        if (my != attSeq[0]) return;
+                        try {
+                            Object[] r = get();
+                            PayrollService.AttendanceDays a = (PayrollService.AttendanceDays) r[0];
+                            lastAtt[0] = a;
+                            att.setText("<html>From attendance: <b>" + StockDialogs.esc(a.summary()) + "</b></html>");
+                            useAtt.setEnabled(true);
+                            // Only a new record is filled in by itself; an existing one changes only with "Use attendance"
+                            // (opening a saved record must never change its pay).
+                            if (isNew) {
+                                filling[0] = true;
+                                try {
+                                    if (!daysTyped[0]) days.setText(Money.qty(a.days));
+                                    if (rate.getText().trim().isEmpty() && r[1] != null) rate.setText(((BigDecimal) r[1]).toPlainString());
+                                } finally {
+                                    filling[0] = false;
+                                }
+                            }
+                        } catch (Exception ex) {
+                            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                            att.setText("<html>" + StockDialogs.esc(cause.getMessage()) + "</html>");
+                        }
+                    }
+                }.execute();
+            };
+            useAtt.addActionListener(e -> {
+                if (lastAtt[0] == null) return;
+                filling[0] = true;
+                try {
+                    days.setText(Money.qty(lastAtt[0].days));
+                } finally {
+                    filling[0] = false;
+                }
+                daysTyped[0] = false;
+            });
+            Timer attTimer = new Timer(500, e -> fetchAttendance.run());
+            attTimer.setRepeats(false);
+            who.addActionListener(e -> {
+                if (isNew) daysTyped[0] = false;   // another employee: their own days
+                attTimer.restart();
+            });
+            for (JTextField f : new JTextField[]{start, end}) f.getDocument().addDocumentListener(StockDialogs.listener(attTimer::restart));
+            if (withDays) fetchAttendance.run();
 
             JButton firstHalf = UiKit.secondaryButton("1st–15th");
             JButton secondHalf = UiKit.secondaryButton("16th–end");
@@ -508,18 +621,37 @@ public class PayrollPanel extends JPanel {
             quick.add(month);
             c.gridx = 2;
             form.add(UiKit.group("Quick period", quick), c);
-            c.gridy = 2;
+            if (withDays) {
+                c.gridy = 2;
+                c.gridx = 0;
+                form.add(UiKit.group("Days worked", days), c);
+                c.gridx = 1;
+                form.add(UiKit.group("Daily rate (₱)", rate), c);
+                JPanel attRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+                attRow.setOpaque(false);
+                attRow.add(useAtt);
+                c.gridx = 2;
+                form.add(UiKit.group("Basic pay = days x daily rate", attRow), c);
+                c.gridy = 3;
+                c.gridx = 0;
+                c.gridwidth = 3;
+                att.setPreferredSize(new Dimension(560, 34));
+                att.setVerticalAlignment(SwingConstants.TOP);
+                form.add(att, c);
+                c.gridwidth = 1;
+            }
+            c.gridy = 4;
             c.gridx = 0;
             form.add(UiKit.group("Basic pay (₱)", basic), c);
             c.gridx = 1;
             form.add(UiKit.group("Allowances (₱)", allow), c);
             c.gridx = 2;
             form.add(UiKit.group("Deductions (₱)", ded), c);
-            c.gridy = 3;
+            c.gridy = 5;
             c.gridx = 0;
             c.gridwidth = 3;
             form.add(net, c);
-            c.gridy = 4;
+            c.gridy = 6;
             c.gridwidth = 1;
             JPanel st = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             st.setOpaque(false);
@@ -531,11 +663,11 @@ public class PayrollPanel extends JPanel {
             form.add(UiKit.group("Paid on", paidOn), c);
             c.gridx = 2;
             form.add(UiKit.group("Paid by", method), c);
-            c.gridy = 5;
+            c.gridy = 7;
             c.gridx = 0;
             c.gridwidth = 3;
             form.add(UiKit.group("Notes", notes), c);
-            c.gridy = 6;
+            c.gridy = 8;
             form.add(error, c);
 
             JButton save = UiKit.primaryButton(isNew ? "Save record" : "Save changes");
@@ -553,14 +685,20 @@ public class PayrollPanel extends JPanel {
                     error.setText("Write dates as YYYY-MM-DD, for example 2026-10-15.");
                     return;
                 }
+                final BigDecimal dw, dr;
                 try {
                     b = Money.parse(basic.getText(), "basic pay", false);
                     a = Money.parse(allow.getText(), "allowances", true);
                     de = Money.parse(ded.getText(), "deductions", true);
+                    dw = withDays ? PayrollService.parseDays(days.getText()) : null;
+                    dr = withDays ? Money.parse(rate.getText(), "daily rate", true) : null;
                 } catch (IllegalArgumentException ex) {
                     error.setText(ex.getMessage());
                     return;
                 }
+                // save the days and rate when given, or to clear ones the record had
+                final boolean sendDays = withDays && (dw != null || dr != null
+                        || (!isNew && (rec.daysWorked != null || rec.dailyRate != null)));
                 if (nm.isEmpty()) {
                     error.setText("Choose the employee or type the name.");
                     return;
@@ -580,7 +718,7 @@ public class PayrollPanel extends JPanel {
                     protected Long doInBackground() throws Exception {
                         return PayrollService.save(isNew ? null : rec.id, requestId, user, staffId, nm, s, en, b,
                                 a == null ? BigDecimal.ZERO : a, de == null ? BigDecimal.ZERO : de, isPaid, po, m,
-                                nt.isEmpty() ? null : nt);
+                                nt.isEmpty() ? null : nt, dw, dr, sendDays);
                     }
 
                     @Override
