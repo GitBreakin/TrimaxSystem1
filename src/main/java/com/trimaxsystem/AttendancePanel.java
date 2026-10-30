@@ -40,8 +40,9 @@ import javax.swing.table.DefaultTableModel;
 /**
  * Attendance: every Start duty / End duty that agents and drivers record in the mobile app, with the
  * server's date and time, where they were, how long the shift lasted, and the attendance photo.
- * Read-only; times are Asia/Manila. "Employees without an app..." opens the Admin-marked attendance of the
- * other employees (StaffAttendanceDialog).
+ * Times are Asia/Manila. "Employees without an app..." opens the Admin-marked attendance of the other employees
+ * (StaffAttendanceDialog); "Time in / Time out..." lets the Admin record Start / End duty for an agent or driver
+ * (AdminDutyDialog, sql/20261030_03), shown as "(admin)" with who recorded it.
  */
 public class AttendancePanel extends JPanel {
 
@@ -108,6 +109,19 @@ public class AttendancePanel extends JPanel {
             StaffAttendanceDialog.open(javax.swing.SwingUtilities.getWindowAncestor(this));
         });
         filters.add(staff);
+        // The Admin records a Time in / Time out for an agent or driver (sql/20261030_03)
+        JButton inOut = UiKit.secondaryButton("Time in / Time out...");
+        inOut.setToolTipText("Record Start / End duty for an agent or driver who could not tap it in the app");
+        inOut.addActionListener(e -> {
+            if (!Db.adminDutyReady()) {
+                javax.swing.JOptionPane.showMessageDialog(this,
+                        Db.notReadyMessage("Time in / Time out by the Admin", Db.UPDATE_30_ADMIN_DUTY),
+                        "Attendance", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            if (AdminDutyDialog.open(javax.swing.SwingUtilities.getWindowAncestor(this))) load();
+        });
+        filters.add(inOut);
         period.setSelectedIndex(1);
 
         onDutyChip.setFont(new Font("SansSerif", Font.BOLD, 13));
@@ -135,7 +149,7 @@ public class AttendancePanel extends JPanel {
         table.getTableHeader().setReorderingAllowed(false);
         table.setFillsViewportHeight(true);
         table.getColumnModel().getColumn(3).setCellRenderer(new EventRenderer());
-        int[] widths = {130, 160, 60, 85, 100, 60};
+        int[] widths = {120, 150, 60, 135, 95, 50};
         for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) showSelected();
@@ -285,7 +299,7 @@ public class AttendancePanel extends JPanel {
             ZonedDateTime at = ev.at.toInstant().atZone(Theme.BUSINESS_TZ);
             model.addRow(new Object[]{
                     WHEN.format(at), ev.displayName(), ev.role == null ? "" : ev.role,
-                    ev.isStart() ? "Start duty" : "End duty",
+                    (ev.isStart() ? "Start duty" : "End duty") + (ev.byAdmin() ? " (admin)" : ""),
                     ev.isStart() ? "" : (ev.shiftSeconds == null ? "no start found" : AttendanceService.formatShift(ev.shiftSeconds)),
                     ev.hasGps() ? "Yes" : "None"});
         }
@@ -335,14 +349,19 @@ public class AttendancePanel extends JPanel {
         UiKit.addDetailRow(facts, row++, "Name", ev.displayName() + "  (" + ev.username + ")", 160);
         UiKit.addDetailRow(facts, row++, "Role", ev.role == null ? "Unknown" : ev.role, 160);
         UiKit.addDetailRow(facts, row++, "Event", ev.isStart() ? "Start duty" : "End duty", 160);
-        UiKit.addDetailRow(facts, row++, "Server time", Theme.formatWhen(ev.at), 160);
+        UiKit.addDetailRow(facts, row++, ev.byAdmin() ? "Time" : "Server time", Theme.formatWhen(ev.at), 160);
+        if (ev.byAdmin()) {
+            UiKit.addDetailRow(facts, row++, "Recorded by",
+                    (ev.recordedByName == null ? ev.recordedBy : ev.recordedByName) + " (Admin, on the Desktop)", 160);
+            if (ev.note != null) UiKit.addDetailRow(facts, row++, "Note", ev.note, 160);
+        }
         if (!ev.isStart()) {
             UiKit.addDetailRow(facts, row++, "Shift length",
                     ev.shiftSeconds == null ? "No matching Start duty" : AttendanceService.formatShift(ev.shiftSeconds), 160);
         }
         UiKit.addDetailRow(facts, row, "Location", ev.hasGps()
                 ? String.format(Locale.ROOT, "%.6f, %.6f", ev.latitude, ev.longitude)
-                : "No GPS from the phone", 160);
+                : ev.byAdmin() ? "None (recorded on the Desktop)" : "No GPS from the phone", 160);
         openMap.setEnabled(ev.hasGps());
         facts.revalidate();
         facts.repaint();
@@ -354,7 +373,10 @@ public class AttendancePanel extends JPanel {
         retryRow.setVisible(false);
         if (ev == null) return;
         if (ev.photoPath == null) {
-            showPhotoMessage("No photo was sent with this record.");
+            showPhotoMessage(ev.byAdmin()
+                    ? "No photo: " + (ev.isStart() ? "Time in" : "Time out") + " recorded by "
+                      + (ev.recordedByName == null ? ev.recordedBy : ev.recordedByName) + " on the Desktop."
+                    : "No photo was sent with this record.");
             return;
         }
         final int mySeq = ++photoSeq;
@@ -455,7 +477,7 @@ public class AttendancePanel extends JPanel {
         public Component getTableCellRendererComponent(JTable t, Object value, boolean sel, boolean focus, int row, int col) {
             Component c = super.getTableCellRendererComponent(t, value, sel, focus, row, col);
             if (!sel) {
-                boolean start = "Start duty".equals(value);
+                boolean start = String.valueOf(value).startsWith("Start duty");
                 c.setForeground(start ? Theme.OK : Theme.TEXT);
                 c.setFont(c.getFont().deriveFont(start ? Font.BOLD : Font.PLAIN));
             }

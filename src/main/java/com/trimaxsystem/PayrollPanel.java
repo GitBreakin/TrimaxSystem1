@@ -59,7 +59,9 @@ public class PayrollPanel extends JPanel {
 
         YearMonth ym = YearMonth.now(Theme.BUSINESS_TZ);
         from.setText(ym.atDay(1).toString());
-        to.setText(ym.atEndOfMonth().toString());
+        // up to the end of this month, or of this pay week when it ends in the next month (weekly pay, 20261030_02)
+        LocalDate weekEnd = PayrollService.payPeriod(LocalDate.now(Theme.BUSINESS_TZ))[1];
+        to.setText((weekEnd.isAfter(ym.atEndOfMonth()) ? weekEnd : ym.atEndOfMonth()).toString());
         for (JTextField f : new JTextField[]{from, to}) {
             UiKit.styleField(f);
             f.setToolTipText("YYYY-MM-DD: pay periods that END in this range");
@@ -348,8 +350,8 @@ public class PayrollPanel extends JPanel {
         } catch (Db.Failure e) {
             return "<html>Not counted from attendance: " + StockDialogs.esc(e.getMessage()) + "</html>";
         }
-        String text = "Payroll is made from attendance for employees with a daily rate (Employees...): pay periods 1st–15th "
-                + "and 16th–end, counted by itself" + (made + changed > 0 ? " (just now: " + made + " made, " + changed + " updated)" : "")
+        String text = "Payroll is made from attendance for employees with a daily rate (Employees...): weekly, Monday to "
+                + "Sunday, counted by itself" + (made + changed > 0 ? " (just now: " + made + " made, " + changed + " updated)" : "")
                 + ". Paid records are never changed.";
         if (problems.isEmpty()) return text;
         return "<html>" + StockDialogs.esc(text) + "<br><font color='#DC2626'>Not counted: "
@@ -472,8 +474,11 @@ public class PayrollPanel extends JPanel {
             LocalDate today = LocalDate.now(Theme.BUSINESS_TZ);
 
             if (isNew) {
-                LocalDate s = today.getDayOfMonth() <= 15 ? today.withDayOfMonth(1) : today.withDayOfMonth(16);
-                LocalDate e = today.getDayOfMonth() <= 15 ? today.withDayOfMonth(15) : YearMonth.from(today).atEndOfMonth();
+                // weekly pay (Monday to Sunday) once the server makes payroll from attendance; else half a month
+                LocalDate[] week = PayrollService.payPeriod(today);
+                boolean weekly = Db.payrollAutoReady();
+                LocalDate s = weekly ? week[0] : today.getDayOfMonth() <= 15 ? today.withDayOfMonth(1) : today.withDayOfMonth(16);
+                LocalDate e = weekly ? week[1] : today.getDayOfMonth() <= 15 ? today.withDayOfMonth(15) : YearMonth.from(today).atEndOfMonth();
                 start.setText(s.toString());
                 end.setText(e.toString());
                 paidOn.setText(today.toString());
@@ -686,6 +691,8 @@ public class PayrollPanel extends JPanel {
                 fetchAttendance.run();
             }
 
+            JButton thisWeek = UiKit.secondaryButton("Week");
+            thisWeek.setToolTipText("Monday to Sunday of the start date's week");
             JButton firstHalf = UiKit.secondaryButton("1st–15th");
             JButton secondHalf = UiKit.secondaryButton("16th–end");
             JButton month = UiKit.secondaryButton("Whole month");
@@ -704,10 +711,15 @@ public class PayrollPanel extends JPanel {
                 start.setText(base.withDayOfMonth(1).toString());
                 end.setText(YearMonth.from(base).atEndOfMonth().toString());
             });
+            thisWeek.addActionListener(e -> {
+                LocalDate[] w = PayrollService.payPeriod(parseOr(start.getText(), today));
+                start.setText(w[0].toString());
+                end.setText(w[1].toString());
+            });
             // A record made by attendance (20261030_02): the employee, period, days, rate and basic pay are counted by
             // the server; only allowances, deductions, notes and Paid are set here.
             if (!isNew && rec.auto) {
-                for (JComponent comp : new JComponent[]{who, name, start, end, days, rate, basic, useAtt, firstHalf, secondHalf, month}) {
+                for (JComponent comp : new JComponent[]{who, name, start, end, days, rate, basic, useAtt, thisWeek, firstHalf, secondHalf, month}) {
                     comp.setEnabled(false);
                 }
             }
@@ -732,6 +744,7 @@ public class PayrollPanel extends JPanel {
             form.add(UiKit.group("Period end", end), c);
             JPanel quick = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
             quick.setOpaque(false);
+            quick.add(thisWeek);
             quick.add(firstHalf);
             quick.add(secondHalf);
             quick.add(month);

@@ -23,6 +23,7 @@ final class Db {
     static final String UPDATE_29_BOOKING_EDIT = "database update 20261029_03_booking_edit_and_driver_summary";
     static final String UPDATE_30_PAYROLL_ATTENDANCE = "database update 20261030_01_payroll_attendance";
     static final String UPDATE_30_PAYROLL_AUTO = "database update 20261030_02_payroll_auto";
+    static final String UPDATE_30_ADMIN_DUTY = "database update 20261030_03_admin_duty";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
@@ -32,6 +33,7 @@ final class Db {
     private static volatile boolean bookingEditReady;
     private static volatile boolean payrollAttendanceReady;
     private static volatile boolean payrollAutoReady;
+    private static volatile boolean adminDutyReady;
 
     private Db() {
     }
@@ -174,6 +176,20 @@ final class Db {
             return false;
         }
         return payrollAttendanceReady;
+    }
+
+    /** True when the Admin can record a Time in / Time out for an agent or driver (sql/20261030_03). */
+    static boolean adminDutyReady() {
+        if (adminDutyReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.admin_duty_event(text,text,text,timestamptz,text)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            adminDutyReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return adminDutyReady;
     }
 
     /** True when the server makes payroll from attendance by itself, with daily rates (sql/20261030_02). */

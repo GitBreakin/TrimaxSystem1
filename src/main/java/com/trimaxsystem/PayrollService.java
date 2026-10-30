@@ -9,7 +9,6 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -233,10 +232,10 @@ final class PayrollService {
         }
     }
 
-    /** The pay period of a day: 1st-15th or 16th-end of the month (the same as trimax_private.pay_period). */
+    /** The pay week of a day: Monday to Sunday (the same as trimax_private.pay_period; owner: "pay out weekly"). */
     static LocalDate[] payPeriod(LocalDate day) {
-        if (day.getDayOfMonth() <= 15) return new LocalDate[]{day.withDayOfMonth(1), day.withDayOfMonth(15)};
-        return new LocalDate[]{day.withDayOfMonth(16), YearMonth.from(day).atEndOfMonth()};
+        LocalDate monday = day.minusDays(day.getDayOfWeek().getValue() - 1L);
+        return new LocalDate[]{monday, monday.plusDays(6)};
     }
 
     /** Adds (id null) or edits an employee without an account; the database checks and audits it. */
@@ -633,10 +632,13 @@ final class PayrollService {
         /** The payroll record of the pay period of that day (not voided): basic pay, days, status; null when none. */
         BigDecimal periodPay, periodDays;
         String periodStatus;
+        /** Another record that covers part of the week, e.g. "#4 (2026-10-16 to 2026-10-31)": no weekly record then. */
+        String overlap;
 
-        /** "₱900.00 (1.5 days)", "₱900.00 paid", "No daily rate". */
+        /** "₱900.00 (1.5 days)", "₱900.00 paid", "No daily rate", "In #4 (...)". */
         String payrollText() {
             if (dailyRate == null) return periodPay == null ? "No daily rate" : Money.peso(periodPay) + " (no daily rate)";
+            if (periodPay == null && overlap != null) return "In record " + overlap;
             if (periodPay == null) return Money.peso(BigDecimal.ZERO);
             return Money.peso(periodPay) + ("PAID".equals(periodStatus) ? " paid"
                     : periodDays == null ? "" : " (" + dayWord(periodDays) + ")");
@@ -656,11 +658,16 @@ final class PayrollService {
                              + "   from staff_attendance m where m.staff_id = s.staff_id "
                              + "    and m.work_date between date_trunc('month', ?::date)::date and ?::date), "
                              // the daily rate (20261030_02) and this pay period's record
-                             + "(to_jsonb(s) ->> 'daily_rate')::numeric, pr.basic_pay, pr.days_worked, pr.status "
+                             + "(to_jsonb(s) ->> 'daily_rate')::numeric, pr.basic_pay, pr.days_worked, pr.status, ov.label "
                              + "from payroll_staff s left join staff_attendance a on a.staff_id = s.staff_id and a.work_date = ? "
                              + "left join lateral (select r.basic_pay, r.days_worked, r.status from payroll_records r "
                              + "   where r.staff_id = s.staff_id and r.period_start = ? and r.period_end = ? and r.status <> 'VOID' "
                              + "   order by r.payroll_id limit 1) pr on true "
+                             // another record covering part of the week (e.g. a 1st-15th one): no weekly record then
+                             + "left join lateral (select '#' || r.payroll_id || ' (' || r.period_start || ' to ' || r.period_end || ')' as label "
+                             + "   from payroll_records r where r.staff_id = s.staff_id and r.status <> 'VOID' "
+                             + "    and r.period_start <= ? and r.period_end >= ? and not (r.period_start = ? and r.period_end = ?) "
+                             + "   order by r.payroll_id limit 1) ov on true "
                              + "where s.active or a.staff_id is not null order by lower(s.name), s.staff_id")) {
             LocalDate[] period = payPeriod(day);
             ps.setDate(1, Date.valueOf(day));
@@ -668,6 +675,10 @@ final class PayrollService {
             ps.setDate(3, Date.valueOf(day));
             ps.setDate(4, Date.valueOf(period[0]));
             ps.setDate(5, Date.valueOf(period[1]));
+            ps.setDate(6, Date.valueOf(period[1]));
+            ps.setDate(7, Date.valueOf(period[0]));
+            ps.setDate(8, Date.valueOf(period[0]));
+            ps.setDate(9, Date.valueOf(period[1]));
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     StaffDay d = new StaffDay();
@@ -682,6 +693,7 @@ final class PayrollService {
                     d.periodPay = rs.getBigDecimal(9);
                     d.periodDays = rs.getBigDecimal(10) == null ? null : InventoryService.qtyOf(rs.getBigDecimal(10));
                     d.periodStatus = rs.getString(11);
+                    d.overlap = rs.getString(12);
                     out.add(d);
                 }
             }

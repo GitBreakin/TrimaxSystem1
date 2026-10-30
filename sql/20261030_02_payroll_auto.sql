@@ -8,12 +8,15 @@
 --   1. A daily rate per employee (the pay for one full day): payroll_staff.daily_rate for the employees without
 --      an app account, and public.payroll_account_rates for app accounts (agents, drivers). Owner only.
 --   2. payroll_records.auto: the record is kept by attendance (days worked x daily rate = basic pay).
---   3. trimax_private.pay_period(day): the pay period of a day, 1st-15th or 16th-end of the month.
+--   3. trimax_private.pay_period(day): the pay week of a day, Monday to Sunday (owner, 13:27: "pay out weekly";
+--      the week runs Monday to Sunday).
 --   4. trimax_private.sync_payroll(actor, username, staff_id, day): for an employee with a daily rate, makes or
 --      updates the UNPAID record of the period of that day from attendance_days() (20261030_01). A PAID record is
 --      never changed. An unpaid record of the same employee and period that was typed by hand (also a typed name
 --      equal to the employee's name) is taken over once attendance is recorded in that period. Nothing recorded
---      in the period: no record is made and a typed record stays as typed.
+--      in the period: no record is made and a typed record stays as typed. When another record of the employee
+--      already covers part of the week (for example a 1st-15th one typed before), no weekly record is made, so
+--      nothing is paid twice; the Desktop says which record it is.
 --      A past period keeps the daily rate it was counted with; the current one uses the employee's rate.
 --   5. trimax_private.set_employee_rate(admin, username, staff_id, rate): Admin only, audited; the current period
 --      is counted again. No rate: the employee's unpaid automatic records become ordinary (typed) records.
@@ -75,10 +78,8 @@ language sql
 immutable
 set search_path = public, pg_temp
 as $function$
-    select case when extract(day from p_day) <= 15 then date_trunc('month', p_day::timestamp)::date
-                else date_trunc('month', p_day::timestamp)::date + 15 end,
-           case when extract(day from p_day) <= 15 then date_trunc('month', p_day::timestamp)::date + 14
-                else (date_trunc('month', p_day::timestamp) + interval '1 month - 1 day')::date end
+    -- Monday to Sunday
+    select p_day - (extract(isodow from p_day)::int - 1), p_day - (extract(isodow from p_day)::int - 1) + 6
 $function$;
 
 -- ===================================================================================== 4. COUNT ONE EMPLOYEE'S PERIOD
@@ -144,6 +145,15 @@ begin
     if v_rec.payroll_id is null then
         if not v_any then
             return 'nothing';
+        end if;
+        -- another record of this employee already covers part of the week: no second pay for the same days
+        if exists (select 1 from public.payroll_records r
+                    where r.status <> 'VOID' and r.period_start <= v_pe and r.period_end >= v_ps
+                      and case when p_staff_id is not null
+                               then r.staff_id = p_staff_id
+                                    or (r.staff_id is null and r.employee_username is null and lower(r.employee_name) = lower(v_name))
+                               else r.employee_username = p_username end) then
+            return 'overlap';
         end if;
         v_basic := round(v_days * v_rate, 2);
         insert into public.payroll_records (employee_username, employee_name, period_start, period_end, basic_pay,
@@ -279,8 +289,13 @@ declare
     v_updated int := 0;
     v_paid int := 0;
     v_problems text[] := '{}';
+    v_ps date;
+    v_pe date;
+    v_name text;
+    v_other text;
 begin
     perform trimax_private.require_admin(p_admin);
+    select p.period_start, p.period_end into v_ps, v_pe from trimax_private.pay_period(p_day) p;
     if p_day is null or p_day > (now() at time zone 'Asia/Manila')::date + 31 then
         raise exception using errcode = 'TM422', message = 'Choose a day in the pay period.';
     end if;
@@ -298,6 +313,24 @@ begin
         if v_res = 'created' then v_created := v_created + 1;
         elsif v_res = 'updated' then v_updated := v_updated + 1;
         elsif v_res = 'paid' then v_paid := v_paid + 1;
+        elsif v_res = 'overlap' then
+            if v_e.s is not null then
+                select s.name into v_name from public.payroll_staff s where s.staff_id = v_e.s;
+            else
+                select coalesce(nullif(btrim(u.name), ''), u.username) into v_name from public.users u where u.username = v_e.u;
+            end if;
+            select '#' || r.payroll_id || ' (' || r.period_start || ' to ' || r.period_end || ', ' || lower(r.status) || ')'
+              into v_other
+              from public.payroll_records r
+             where r.status <> 'VOID' and r.period_start <= v_pe and r.period_end >= v_ps
+               and case when v_e.s is not null
+                        then r.staff_id = v_e.s
+                             or (r.staff_id is null and r.employee_username is null and lower(r.employee_name) = lower(v_name))
+                        else r.employee_username = v_e.u end
+             order by r.payroll_id limit 1;
+            v_problems := v_problems || (v_name || ': no weekly payroll for ' || v_ps || ' to ' || v_pe || ', because record '
+                                         || coalesce(v_other, '?') || ' already covers part of that week. Void it if it was typed '
+                                         || 'by mistake, and attendance makes the week''s payroll.');
         end if;
     end loop;
     return jsonb_build_object('created', v_created, 'updated', v_updated, 'paid', v_paid,

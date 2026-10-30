@@ -63,14 +63,13 @@ class PayrollAttendanceTest {
     }
 
     @Test
-    void payPeriodsAreTheFifteenthAndTheEndOfTheMonth() {
-        // the same as trimax_private.pay_period (sql/20261030_02)
-        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2026-10-01"), java.time.LocalDate.parse("2026-10-15")},
-                PayrollService.payPeriod(java.time.LocalDate.parse("2026-10-15")));
-        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2026-10-16"), java.time.LocalDate.parse("2026-10-31")},
-                PayrollService.payPeriod(java.time.LocalDate.parse("2026-10-30")));
-        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2024-02-16"), java.time.LocalDate.parse("2024-02-29")},
-                PayrollService.payPeriod(java.time.LocalDate.parse("2024-02-16")));
+    void payWeeksRunMondayToSunday() {
+        // the same as trimax_private.pay_period (sql/20261030_02); owner: weekly pay, Monday to Sunday
+        java.util.function.Function<String, java.time.LocalDate> d = java.time.LocalDate::parse;
+        assertArrayEquals(new java.time.LocalDate[]{d.apply("2026-10-26"), d.apply("2026-11-01")}, PayrollService.payPeriod(d.apply("2026-10-30")));
+        assertArrayEquals(new java.time.LocalDate[]{d.apply("2026-10-26"), d.apply("2026-11-01")}, PayrollService.payPeriod(d.apply("2026-10-26")));
+        assertArrayEquals(new java.time.LocalDate[]{d.apply("2026-10-26"), d.apply("2026-11-01")}, PayrollService.payPeriod(d.apply("2026-11-01")));
+        assertArrayEquals(new java.time.LocalDate[]{d.apply("2024-12-30"), d.apply("2025-01-05")}, PayrollService.payPeriod(d.apply("2024-12-31")));
     }
 
     @Test

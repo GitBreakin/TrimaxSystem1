@@ -360,4 +360,18 @@ rm -f "/tmp/$DB.59.log"
 echo "== Payroll made by attendance: rollback after rates are set is refused and changes nothing"
 if psql_owner -f 20261030_98_rollback_payroll_auto.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although rates are set"; exit 1; fi
 check "select to_regclass('public.payroll_account_rates') is not null and exists (select 1 from payroll_records where auto) and exists (select 1 from pg_trigger where tgname = 'duty_events_payroll')" "refused rollback left the rates, the automatic records and the trigger"
+echo "== Admin Time in / Time out: rollback while unused puts everything back, then apply (twice)"
+fn_before3="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_03_admin_duty.sql
+psql_owner -f 20261030_97_rollback_admin_duty.sql
+check "select '$fn_before3' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and not exists (select 1 from information_schema.columns where table_schema = 'trimax_private' and table_name = 'duty_events' and column_name in ('recorded_by', 'note')) and (select is_nullable = 'NO' from information_schema.columns where table_schema = 'trimax_private' and table_name = 'duty_events' and column_name = 'photo_path')" "rollback puts back every function exactly, removes the 2 columns and makes the photo required again"
+psql_owner -f 20261030_03_admin_duty.sql
+psql_owner -f 20261030_03_admin_duty.sql
+psql_su -d "$DB" -f tests/60_admin_duty_tests.sql > "/tmp/$DB.60.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL ADMIN DUTY/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.60.log"
+grep -q '^ALL ADMIN DUTY SQL TESTS PASSED' "/tmp/$DB.60.log" || { echo "FAIL admin duty tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.60.log"
+echo "== Admin Time in / Time out: rollback after an Admin's record is refused and changes nothing"
+if psql_owner -f 20261030_97_rollback_admin_duty.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although Admin records exist"; exit 1; fi
+check "select exists (select 1 from trimax_private.duty_events where recorded_by is not null) and to_regprocedure('trimax_private.admin_duty_event(text,text,text,timestamptz,text)') is not null" "refused rollback left the Admin's records and the function"
 echo "ALL DATABASE TESTS PASSED"

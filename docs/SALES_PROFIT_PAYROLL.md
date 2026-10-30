@@ -159,7 +159,7 @@ See docs/PAYROLL_ATTENDANCE.md.
 
 ### Payroll made by attendance, by itself (database update `20261030_02`)
 
-Each employee, agents and drivers included, has a daily rate (**Payroll → Employees and daily rates**). After that, the Admin only marks Present / Half day / Absent, and agents and drivers only Start / End duty. The unpaid payroll record of the pay period (1st–15th or 16th–end) is made and updated by itself, and paid records are never changed. It lowers net profit like any payroll. See docs/PAYROLL_ATTENDANCE.md, section 4.
+Each employee, agents and drivers included, has a daily rate (**Payroll → Employees and daily rates**). After that, the Admin only marks Present / Half day / Absent, and agents and drivers only Start / End duty. The unpaid payroll record of the pay week (Monday to Sunday) is made and updated by itself, and paid records are never changed. It lowers net profit like any payroll, in the month the week ends. The Admin can also record a Time in / Time out for an agent or driver (`20261030_03`). See docs/PAYROLL_ATTENDANCE.md, section 4.
 
 ## Other expenses (Expenses, database update `20261027_02`)
 

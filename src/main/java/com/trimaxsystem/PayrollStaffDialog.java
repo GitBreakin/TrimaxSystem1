@@ -139,7 +139,7 @@ final class PayrollStaffDialog {
                         note.setText("No employees yet. Use Add employee... for anyone paid who has no app account.");
                     } else if (rates) {
                         note.setText(noRate == 0
-                                ? "Each day of attendance goes into payroll by itself: days x daily rate, pay periods 1st–15th and 16th–end."
+                                ? "Each day of attendance goes into payroll by itself: days x daily rate, paid weekly (Monday to Sunday)."
                                 : noRate + (noRate == 1 ? " employee has" : " employees have")
                                   + " no daily rate yet: their attendance does not go into payroll until it is set.");
                     } else {

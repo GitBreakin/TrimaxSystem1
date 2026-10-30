@@ -317,18 +317,23 @@ final class StaffAttendanceDialog extends JDialog {
     private String payrollReport(LocalDate d, java.util.Set<Long> ids) {
         if (!autoReady) return "Saved.";
         LocalDate[] p = PayrollService.payPeriod(d);
-        List<String> pay = new ArrayList<>(), noRate = new ArrayList<>(), paid = new ArrayList<>();
+        List<String> pay = new ArrayList<>(), noRate = new ArrayList<>(), paid = new ArrayList<>(), other = new ArrayList<>();
         for (PayrollService.StaffDay r : rows) {
             if (!ids.contains(r.staffId)) continue;
             if (r.dailyRate == null) noRate.add(r.name);
             else if ("PAID".equals(r.periodStatus)) paid.add(r.name);
+            else if (r.periodPay == null && r.overlap != null) other.add(r.name + " " + r.overlap);
             else pay.add(r.name + " " + r.payrollText());
         }
-        StringBuilder sb = new StringBuilder("<html>Saved. Payroll " + p[0] + " to " + p[1] + ": ");
+        StringBuilder sb = new StringBuilder("<html>Saved. Payroll week " + p[0] + " to " + p[1] + ": ");
         sb.append(pay.isEmpty() ? "nothing to count" : StockDialogs.esc(String.join("; ", pay))).append('.');
         if (!noRate.isEmpty()) {
             sb.append(" <font color='#B45309'>No daily rate yet: ").append(StockDialogs.esc(String.join(", ", noRate)))
               .append(" (set it in Payroll → Employees..., then their days go to payroll).</font>");
+        }
+        if (!other.isEmpty()) {
+            sb.append(" <font color='#B45309'>Not added, another record already covers part of this week: ")
+              .append(StockDialogs.esc(String.join(", ", other))).append(" (void it in Payroll if it was typed by mistake).</font>");
         }
         if (!paid.isEmpty()) {
             sb.append(" <font color='#B45309'>Already paid for this period, not changed: ")
