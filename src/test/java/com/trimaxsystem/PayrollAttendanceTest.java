@@ -63,6 +63,39 @@ class PayrollAttendanceTest {
     }
 
     @Test
+    void payPeriodsAreTheFifteenthAndTheEndOfTheMonth() {
+        // the same as trimax_private.pay_period (sql/20261030_02)
+        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2026-10-01"), java.time.LocalDate.parse("2026-10-15")},
+                PayrollService.payPeriod(java.time.LocalDate.parse("2026-10-15")));
+        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2026-10-16"), java.time.LocalDate.parse("2026-10-31")},
+                PayrollService.payPeriod(java.time.LocalDate.parse("2026-10-30")));
+        assertArrayEquals(new java.time.LocalDate[]{java.time.LocalDate.parse("2024-02-16"), java.time.LocalDate.parse("2024-02-29")},
+                PayrollService.payPeriod(java.time.LocalDate.parse("2024-02-16")));
+    }
+
+    @Test
+    void aNewEmployeeNeedsADailyRate() {
+        assertEquals(0, new BigDecimal("600").compareTo(PayrollStaffDialog.parseRate("600")));
+        assertThrows(IllegalArgumentException.class, () -> PayrollStaffDialog.parseRate(""));
+        assertThrows(IllegalArgumentException.class, () -> PayrollStaffDialog.parseRate("0"));
+        assertThrows(IllegalArgumentException.class, () -> PayrollStaffDialog.parseRate("abc"));
+    }
+
+    @Test
+    void theAttendanceWindowShowsThePayOfThePeriod() {
+        PayrollService.StaffDay d = new PayrollService.StaffDay();
+        assertEquals("No daily rate", d.payrollText());
+        d.dailyRate = new BigDecimal("600");
+        assertEquals(Money.peso(BigDecimal.ZERO), d.payrollText());
+        d.periodPay = new BigDecimal("900.00");
+        d.periodDays = new BigDecimal("1.5");
+        d.periodStatus = "UNPAID";
+        assertEquals(Money.peso(new BigDecimal("900.00")) + " (1.5 days)", d.payrollText());
+        d.periodStatus = "PAID";
+        assertEquals(Money.peso(new BigDecimal("900.00")) + " paid", d.payrollText());
+    }
+
+    @Test
     void theListShowsDaysAndRate() {
         assertEquals("11.5 x " + Theme.money(new BigDecimal("600")), PayrollService.daysText(new BigDecimal("11.50"), new BigDecimal("600")));
         assertEquals("1 day", PayrollService.daysText(BigDecimal.ONE, null));

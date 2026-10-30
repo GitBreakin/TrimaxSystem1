@@ -65,6 +65,80 @@ The owner marked a half day, but the basic pay stayed ₱600. The basic pay had 
 - **Nothing recorded in the period** (no marks, no duty): **Days worked** is left empty instead of 0. The editor says no attendance is recorded, and a fixed basic pay saves without a question.
 - **Leave Days worked empty** to pay a fixed amount.
 
+## 4. Payroll made by attendance, by itself (database update `20261030_02`, added 2026-10-30)
+
+Owner's request, 11:50: "kapag mag add ng new employee dapat i seset agad yung basic pay nya, then kada present, absent, halfday sa attendance, automatic na sya papasok sa payroll, hindi na manual i aadd ... ang gagawin nalang ni admin present half day or absent tas automatic na sya papasok sa payroll".
+
+Database update: `sql/20261030_02_payroll_auto.sql`.
+- Rollback: `sql/20261030_98_rollback_payroll_auto.sql`. It is refused once a daily rate or an automatic record exists.
+- It adds 1 table, 2 columns, 1 trigger and 5 functions, and replaces 2 functions. It changes no row.
+- The phones are not changed. No new APK is needed.
+
+**Daily rate**
+- **Payroll → Employees...** is now **Employees and daily rates**. It lists the employees without an app account and the agents and drivers, with their daily rate (the pay for one full day).
+- **Add employee...** asks for the daily rate; an employee cannot be added without one.
+- For an agent or driver: select them → **Edit / daily rate...** → type the rate. Leave it empty to stop their automatic payroll.
+- A daily rate is in the history (audit log), with the old rate when it changes.
+
+**The Admin only marks the day**
+- **Attendance → Employees without an app...** → Present / Half day / Absent → **Save attendance**.
+- The payroll record of that day's pay period is made or updated at once: days worked × daily rate = basic pay.
+- The window has a **Payroll this period** column, for example *₱900.00 (1.5 days)*. After saving it says, for example: *Saved. Payroll 2026-10-16 to 2026-10-31: jairus ₱300.00 (0.5 day).*
+- Agents and drivers: each **End duty** from the app updates their payroll the same way (8 hours = 1 day). A problem with the payroll never stops the End duty.
+
+**Pay periods:** 1st–15th and 16th–end of the month (kinsenas).
+
+**What changes and what never does**
+- A **paid** record is never changed. If the attendance changes later, the record says so when opened, and the attendance window says *Already paid for this period, not changed*.
+- An unpaid record typed by hand for the same employee and period is taken over once attendance is recorded. A typed name equal to the employee's name is taken over too. With no attendance in the period, a typed record stays as it was typed.
+- A new daily rate is used for the current period. A past period keeps the rate it was counted with.
+- A record made by attendance is marked **auto** in the list (*0.5 x ₱600.00 · auto*). In its editor, the employee, period, days, rate and basic pay are locked. **Allowances, deductions, notes and Paid** can still be set.
+- If deductions would become more than the pay, the attendance is refused with a message, and nothing is saved.
+- Opening **Payroll** counts again the current and the previous pay period for everyone with a daily rate. This catches an End duty whose count failed.
+- **New payroll record** still works, for example for someone paid a fixed amount without a daily rate.
+
+**Database**
+- `payroll_staff.daily_rate` and `public.payroll_account_rates`: owner only, RLS on, no API access.
+- `payroll_records.auto`.
+- `trimax_private.pay_period(day)`, `sync_payroll(actor, username, staff_id, day)`, `set_employee_rate(admin, username, staff_id, rate)`, `sync_payroll_all(admin, day)`: owner only.
+- The trigger `duty_events_payroll` (End duty).
+- `save_staff_attendance` now counts the payroll after saving.
+- `set_payroll_attendance` no longer writes "x ₱0.00" in the history when there is no rate.
+
+**Checked**
+- **Database tests:** `sql/tests/59_payroll_auto_tests.sql` covers:
+  - access and pay periods;
+  - rate checks;
+  - taking over a typed record, also by name;
+  - half day;
+  - counting everyone;
+  - a past period keeps its rate;
+  - a paid record is never changed;
+  - deductions;
+  - End duty: a night shift counts on its start day, and a payroll error never stops the End duty;
+  - the phone's own End duty;
+  - removing a rate;
+  - the rollback refused once rates exist.
+
+  The whole suite passes (1004 checks), including the rollback and re-apply.
+- **Dry run** on the local production-like copy, applied twice:
+  - the 5 new functions are `duty_events_payroll` `eb01c419…`, `pay_period` `a40907b0…`, `set_employee_rate` `32a171fd…`, `sync_payroll` `cbf22752…`, `sync_payroll_all` `c3d9d294…`;
+  - the 2 replaced functions are `save_staff_attendance` `4acbd671…` and `set_payroll_attendance` `decdb625…`;
+  - every other function is unchanged, and the API roles have no access.
+- **Production read-only pre-check (2026-10-30):** the 110 functions besides `resolve_alert` are identical to the copy before the update. There is no rates table and no trigger yet.
+- **Desktop unit tests:** 121 pass.
+- **Desktop end-to-end:** E2EPayAuto (15 checks) covers:
+  - adding an employee needs a rate;
+  - a driver's rate;
+  - Present, then Half day, makes ₱600, then ₱300, by itself;
+  - an employee with no rate;
+  - Maria's End duty makes 0.75 × ₱700 = ₱525;
+  - the list marks them auto;
+  - the locked editor with an allowance;
+  - after Paid, the attendance no longer changes it.
+
+  All 10 end-to-end scripts pass (174 checks).
+
 ## Database
 
 - `public.staff_attendance`: one row per employee and day: PRESENT / HALF_DAY / ABSENT, note, who saved it and when. Owner only: RLS on, no API access.

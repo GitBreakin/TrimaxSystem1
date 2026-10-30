@@ -48,6 +48,9 @@ public class PayrollPanel extends JPanel {
     /** Employees without an app account (helpers, cashiers...): sql/20261029_01. */
     private final JButton btnStaff = UiKit.secondaryButton("Employees...");
     private int seq;
+    /** What counting the payroll from attendance did (20261030_02). */
+    private final JLabel autoNote = new JLabel(" ");
+    private long lastCount;
 
     public PayrollPanel() {
         super(new BorderLayout(0, 10));
@@ -97,6 +100,12 @@ public class PayrollPanel extends JPanel {
         north.add(filters);
         north.add(Box.createVerticalStrut(10));
         north.add(kpis);
+        // payroll made by attendance (20261030_02): what the last count did, or its problems
+        autoNote.setFont(Theme.SMALL);
+        autoNote.setForeground(Theme.MUTED);
+        autoNote.setAlignmentX(Component.LEFT_ALIGNMENT);
+        autoNote.setBorder(new EmptyBorder(8, 2, 0, 0));
+        north.add(autoNote);
         add(north, BorderLayout.NORTH);
 
         UiKit.styleTable(table, 38);
@@ -109,7 +118,7 @@ public class PayrollPanel extends JPanel {
                 s -> "Paid".equals(s) ? Theme.OK : "Unpaid".equals(s) ? Theme.WARN : Theme.MUTED));
         table.getColumnModel().getColumn(8).setCellRenderer(new UiKit.CellRenderer(SwingConstants.LEFT, false, false));
         UiKit.alignHeaders(table, 3, 4, 5, 6);
-        int[] widths = {50, 200, 190, 100, 100, 100, 110, 100, 110, 130};
+        int[] widths = {40, 190, 170, 90, 90, 90, 100, 90, 100, 200};
         for (int i = 0; i < widths.length; i++) table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         table.getSelectionModel().addListSelectionListener(e -> updateButtons());
         table.addMouseListener(new MouseAdapter() {
@@ -266,17 +275,26 @@ public class PayrollPanel extends JPanel {
         final Long staffId = who != null && who.isStaff() ? who.staffId : null;
         final String st = STATUS_CODE[Math.max(0, status.getSelectedIndex())];
         final int mySeq = ++seq;
-        state.showLoading("Loading payroll...");
+        // Count the payroll from attendance first (this period and the one before), at most every 20 seconds
+        final boolean count = Db.payrollAutoReady() && System.currentTimeMillis() - lastCount > 20_000;
+        if (count) lastCount = System.currentTimeMillis();
+        final String[] counted = {null};
+        state.showLoading(count ? "Counting the payroll from attendance..." : "Loading payroll...");
         cards.show(center, "state");
         new SwingWorker<PayrollService.Page, Void>() {
             @Override
             protected PayrollService.Page doInBackground() throws Exception {
+                if (count) counted[0] = countFromAttendance();
                 return PayrollService.list(user, staffId, st, f, t);
             }
 
             @Override
             protected void done() {
                 if (mySeq != seq) return;
+                if (counted[0] != null) {
+                    autoNote.setText(counted[0]);
+                    autoNote.setForeground(counted[0].contains("Not counted") ? Theme.DANGER : Theme.MUTED);
+                }
                 try {
                     PayrollService.Page p = get();
                     rows.clear();
@@ -298,7 +316,7 @@ public class PayrollPanel extends JPanel {
                         model.addRow(new Object[]{r.id, r.name + (r.username == null ? "" : "  (" + r.username + ")"), r.period(),
                                 Money.plain(r.basic), Money.plain(r.allowances), Money.plain(r.deductions), Money.plain(r.net),
                                 PayrollService.statusLabel(r.status), r.paidAt == null ? "" : r.paidAt.toString(),
-                                PayrollService.daysText(r.daysWorked, r.dailyRate)});
+                                PayrollService.daysText(r.daysWorked, r.dailyRate) + (r.auto ? "  · auto" : "")});
                     }
                     cards.show(center, "table");
                     updateButtons();
@@ -309,6 +327,33 @@ public class PayrollPanel extends JPanel {
                 }
             }
         }.execute();
+    }
+
+    /**
+     * Counts the payroll from attendance for the current and the previous pay period (everyone with a daily rate) and
+     * says what it did. A paid record is never changed by the server.
+     */
+    private static String countFromAttendance() {
+        LocalDate today = LocalDate.now(Theme.BUSINESS_TZ);
+        LocalDate[] now = PayrollService.payPeriod(today);
+        List<String> problems = new ArrayList<>();
+        int made = 0, changed = 0;
+        try {
+            for (LocalDate day : new LocalDate[]{now[0].minusDays(1), today}) {
+                PayrollService.SyncResult r = PayrollService.syncAll(day);
+                made += r.created;
+                changed += r.updated;
+                problems.addAll(r.problems);
+            }
+        } catch (Db.Failure e) {
+            return "<html>Not counted from attendance: " + StockDialogs.esc(e.getMessage()) + "</html>";
+        }
+        String text = "Payroll is made from attendance for employees with a daily rate (Employees...): pay periods 1st–15th "
+                + "and 16th–end, counted by itself" + (made + changed > 0 ? " (just now: " + made + " made, " + changed + " updated)" : "")
+                + ". Paid records are never changed.";
+        if (problems.isEmpty()) return text;
+        return "<html>" + StockDialogs.esc(text) + "<br><font color='#DC2626'>Not counted: "
+                + StockDialogs.esc(String.join("; ", problems)) + "</font></html>";
     }
 
     private void edit() {
@@ -522,9 +567,13 @@ public class PayrollPanel extends JPanel {
                             + Money.peso(PayrollService.basicFromDays(dd, rr)));
                 }
                 PayrollService.AttendanceDays a = lastAtt[0];
-                if (!isNew && a != null && a.any() && (dd == null || a.days.compareTo(dd) != 0)) {
+                boolean auto = !isNew && rec.auto;
+                if (auto && !"PAID".equals(rec.status)) {
+                    lines.add("Made from attendance: change the attendance or the daily rate to change it.");
+                } else if (!isNew && a != null && a.any() && (dd == null || a.days.compareTo(dd) != 0)) {
                     lines.add("Attendance now counts " + PayrollService.dayWord(a.days) + "; this record has "
-                            + (dd == null ? "no days" : PayrollService.dayWord(dd)) + ". Click Use attendance to update it.");
+                            + (dd == null ? "no days" : PayrollService.dayWord(dd))
+                            + (auto ? " (paid, so it is not changed)." : ". Click Use attendance to update it."));
                     warn = true;
                 }
                 calc.setForeground(warn ? Theme.WARN : Theme.MUTED);
@@ -587,16 +636,23 @@ public class PayrollPanel extends JPanel {
                                         + (emp.isStaff() ? " (mark it in Attendance → Employees without an app...)" : " (no Start / End duty)")
                                         + ". Type the days worked, or leave them empty to pay a fixed amount.</html>");
                             }
-                            useAtt.setEnabled(a.any());
+                            useAtt.setEnabled(a.any() && (isNew || !rec.auto));   // a record made by attendance stays locked
                             // Only a new record is filled in by itself; an existing one changes only with "Use attendance"
                             // (opening a saved record must never change its pay). Nothing recorded: days left empty.
                             if (isNew) {
                                 filling[0] = true;
                                 try {
                                     if (!daysTyped[0]) days.setText(a.any() ? Money.qty(a.days) : "");
-                                    if (rate.getText().trim().isEmpty() && r[1] != null) rate.setText(((BigDecimal) r[1]).toPlainString());
+                                    BigDecimal known = emp.dailyRate != null ? emp.dailyRate : (BigDecimal) r[1];
+                                    if (emp.dailyRate != null) rate.setText(emp.dailyRate.toPlainString());
+                                    else if (rate.getText().trim().isEmpty() && known != null) rate.setText(known.toPlainString());
                                 } finally {
                                     filling[0] = false;
+                                }
+                                if (emp.dailyRate != null && Db.payrollAutoReady()) {
+                                    att.setText("<html>" + att.getText().replace("<html>", "").replace("</html>", "")
+                                            + "<br><font color='#B45309'>" + StockDialogs.esc(emp.name) + " has a daily rate: their payroll "
+                                            + "is made from attendance by itself and shows in the list. No need to add it here.</font></html>");
                                 }
                             }
                             showCalc.run();
@@ -648,6 +704,13 @@ public class PayrollPanel extends JPanel {
                 start.setText(base.withDayOfMonth(1).toString());
                 end.setText(YearMonth.from(base).atEndOfMonth().toString());
             });
+            // A record made by attendance (20261030_02): the employee, period, days, rate and basic pay are counted by
+            // the server; only allowances, deductions, notes and Paid are set here.
+            if (!isNew && rec.auto) {
+                for (JComponent comp : new JComponent[]{who, name, start, end, days, rate, basic, useAtt, firstHalf, secondHalf, month}) {
+                    comp.setEnabled(false);
+                }
+            }
 
             JPanel form = new JPanel(new GridBagLayout());
             form.setOpaque(false);
@@ -807,9 +870,12 @@ public class PayrollPanel extends JPanel {
                 new SwingWorker<Long, Void>() {
                     @Override
                     protected Long doInBackground() throws Exception {
-                        return PayrollService.save(isNew ? null : rec.id, requestId, user, staffId, nm, s, en, b,
+                        long id = PayrollService.save(isNew ? null : rec.id, requestId, user, staffId, nm, s, en, b,
                                 a == null ? BigDecimal.ZERO : a, de == null ? BigDecimal.ZERO : de, isPaid, po, m,
                                 nt.isEmpty() ? null : nt, dw, dr, sendDays);
+                        // a record made by attendance: count it again (the attendance may have changed meanwhile)
+                        if (!isNew && rec.auto && !isPaid && Db.payrollAutoReady()) PayrollService.syncOne(user, staffId, s);
+                        return id;
                     }
 
                     @Override

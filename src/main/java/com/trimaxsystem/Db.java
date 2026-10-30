@@ -22,6 +22,7 @@ final class Db {
     static final String UPDATE_29_PAYROLL_STAFF = "database update 20261029_01_payroll_staff";
     static final String UPDATE_29_BOOKING_EDIT = "database update 20261029_03_booking_edit_and_driver_summary";
     static final String UPDATE_30_PAYROLL_ATTENDANCE = "database update 20261030_01_payroll_attendance";
+    static final String UPDATE_30_PAYROLL_AUTO = "database update 20261030_02_payroll_auto";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
@@ -30,6 +31,7 @@ final class Db {
     private static volatile boolean payrollStaffReady;
     private static volatile boolean bookingEditReady;
     private static volatile boolean payrollAttendanceReady;
+    private static volatile boolean payrollAutoReady;
 
     private Db() {
     }
@@ -172,6 +174,22 @@ final class Db {
             return false;
         }
         return payrollAttendanceReady;
+    }
+
+    /** True when the server makes payroll from attendance by itself, with daily rates (sql/20261030_02). */
+    static boolean payrollAutoReady() {
+        if (payrollAutoReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regclass('public.payroll_account_rates') is not null "
+                             + "and to_regprocedure('trimax_private.sync_payroll_all(text,date)') is not null "
+                             + "and to_regprocedure('trimax_private.set_employee_rate(text,text,bigint,numeric)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            payrollAutoReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return payrollAutoReady;
     }
 
     /** The update the bad-order screens still need ("" when the server has it). */

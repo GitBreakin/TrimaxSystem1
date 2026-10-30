@@ -346,4 +346,18 @@ rm -f "/tmp/$DB.58.log"
 echo "== Payroll from attendance: rollback after attendance is recorded is refused and changes nothing"
 if psql_owner -f 20261030_99_rollback_payroll_attendance.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although attendance is recorded"; exit 1; fi
 check "select to_regclass('public.staff_attendance') is not null and exists (select 1 from staff_attendance) and exists (select 1 from payroll_records where days_worked is not null)" "refused rollback left the attendance and the payroll days"
+echo "== Payroll made by attendance: rollback while unused puts everything back, then apply (twice)"
+fn_before2="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_owner -f 20261030_98_rollback_payroll_auto.sql
+check "select '$fn_before2' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and to_regclass('public.payroll_account_rates') is null and not exists (select 1 from information_schema.columns where (table_name = 'payroll_records' and column_name = 'auto') or (table_name = 'payroll_staff' and column_name = 'daily_rate')) and not exists (select 1 from pg_trigger where tgname = 'duty_events_payroll')" "rollback puts back every function exactly and removes the rates, the column and the trigger"
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_su -d "$DB" -f tests/59_payroll_auto_tests.sql > "/tmp/$DB.59.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL AUTO/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.59.log"
+grep -q '^ALL PAYROLL AUTO SQL TESTS PASSED' "/tmp/$DB.59.log" || { echo "FAIL payroll auto tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.59.log"
+echo "== Payroll made by attendance: rollback after rates are set is refused and changes nothing"
+if psql_owner -f 20261030_98_rollback_payroll_auto.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although rates are set"; exit 1; fi
+check "select to_regclass('public.payroll_account_rates') is not null and exists (select 1 from payroll_records where auto) and exists (select 1 from pg_trigger where tgname = 'duty_events_payroll')" "refused rollback left the rates, the automatic records and the trigger"
 echo "ALL DATABASE TESTS PASSED"
