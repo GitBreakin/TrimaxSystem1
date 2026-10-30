@@ -1,6 +1,6 @@
 # Client requests (2026-10-29 evening)
 
-Database update: `sql/20261029_03_booking_edit_and_driver_summary.sql`.
+Database update: `sql/20261029_03_booking_edit_and_driver_summary.sql`. **Applied to production on 2026-10-30 (~11:15)** and checked afterwards (see docs/DATABASE_BASELINE.md).
 - Rollback: `sql/20261029_97_rollback_booking_edit_and_driver_summary.sql`.
 - It adds 3 functions and changes no table, column, existing function or row.
 - The Desktop and the phone apps work without it. Until it is applied, **Edit order** is not shown and the driver app shows "–" for its numbers.

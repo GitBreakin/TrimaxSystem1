@@ -7,7 +7,7 @@ Owner's choices:
 - **Agents and drivers:** 8 hours of duty = 1 full day.
 - **Employees without an app account:** the Admin marks Present / Half day / Absent.
 
-Database update: `sql/20261030_01_payroll_attendance.sql`.
+Database update: `sql/20261030_01_payroll_attendance.sql`. **Applied to production on 2026-10-30 (~11:20)** and checked afterwards (see docs/DATABASE_BASELINE.md).
 - Rollback: `sql/20261030_99_rollback_payroll_attendance.sql`. It is refused once any attendance or days are saved.
 - It adds 1 table, 2 columns, 2 checks and 3 functions. It changes no row and no existing function.
 - The phones are not touched. No new APK is needed.
