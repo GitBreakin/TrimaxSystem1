@@ -26,7 +26,7 @@
 --
 -- Phones are unchanged (same functions; an End duty just also updates payroll). save_payroll, the reports and
 -- the driver summary are unchanged: they read payroll_records as before.
--- ORDER: after 20261030_01. Re-runnable. Adds 1 table, 2 columns, 1 trigger, 6 functions; replaces 2.
+-- ORDER: after 20261030_01. Re-runnable. Adds 1 table, 2 columns, 1 trigger, 5 functions; replaces 2.
 -- Changes no rows. Rollback: 20261030_98 (refused once a daily rate or an automatic record exists).
 -- =====================================================================================================
 
