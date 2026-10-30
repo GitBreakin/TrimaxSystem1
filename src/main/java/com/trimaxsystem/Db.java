@@ -20,12 +20,20 @@ final class Db {
     static final String UPDATE_28_BAD_ORDER_LOSS = "database update 20261028_06_bad_order_custom_loss";
     static final String UPDATE_28_HALF_CASE = "database update 20261028_07_half_case";
     static final String UPDATE_29_PAYROLL_STAFF = "database update 20261029_01_payroll_staff";
+    static final String UPDATE_29_BOOKING_EDIT = "database update 20261029_03_booking_edit_and_driver_summary";
+    static final String UPDATE_30_PAYROLL_ATTENDANCE = "database update 20261030_01_payroll_attendance";
+    static final String UPDATE_30_PAYROLL_AUTO = "database update 20261030_02_payroll_auto";
+    static final String UPDATE_30_ADMIN_DUTY = "database update 20261030_03_admin_duty";
 
     private static volatile boolean salesReady;   // only a "yes" is remembered; "no" is asked again
     private static volatile boolean expensesReady;
     private static volatile boolean badOrdersReady;
     private static volatile boolean halfCaseReady;
     private static volatile boolean payrollStaffReady;
+    private static volatile boolean bookingEditReady;
+    private static volatile boolean payrollAttendanceReady;
+    private static volatile boolean payrollAutoReady;
+    private static volatile boolean adminDutyReady;
 
     private Db() {
     }
@@ -137,6 +145,67 @@ final class Db {
             return false;
         }
         return payrollStaffReady;
+    }
+
+    /** True when the server lets the Admin change a booking's order after booking (20261029_03). */
+    static boolean bookingEditReady() {
+        if (bookingEditReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.update_booking_items(text,integer,text,jsonb,text)') is not null "
+                             + "and to_regprocedure('trimax_private.booking_items_signature(integer)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            bookingEditReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return bookingEditReady;
+    }
+
+    /** True when the server counts days worked from attendance and keeps staff attendance (20261030_01). */
+    static boolean payrollAttendanceReady() {
+        if (payrollAttendanceReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regclass('public.staff_attendance') is not null "
+                             + "and to_regprocedure('trimax_private.attendance_days(text,bigint,date,date)') is not null "
+                             + "and to_regprocedure('trimax_private.set_payroll_attendance(text,bigint,numeric,numeric)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            payrollAttendanceReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return payrollAttendanceReady;
+    }
+
+    /** True when the Admin can record a Time in / Time out for an agent or driver (sql/20261030_03). */
+    static boolean adminDutyReady() {
+        if (adminDutyReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regprocedure('trimax_private.admin_duty_event(text,text,text,timestamptz,text)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            adminDutyReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return adminDutyReady;
+    }
+
+    /** True when the server makes payroll from attendance by itself, with daily rates (sql/20261030_02). */
+    static boolean payrollAutoReady() {
+        if (payrollAutoReady) return true;
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "select to_regclass('public.payroll_account_rates') is not null "
+                             + "and to_regprocedure('trimax_private.sync_payroll_all(text,date)') is not null "
+                             + "and to_regprocedure('trimax_private.set_employee_rate(text,text,bigint,numeric)') is not null");
+             ResultSet rs = ps.executeQuery()) {
+            payrollAutoReady = rs.next() && rs.getBoolean(1);
+        } catch (SQLException e) {
+            return false;
+        }
+        return payrollAutoReady;
     }
 
     /** The update the bad-order screens still need ("" when the server has it). */

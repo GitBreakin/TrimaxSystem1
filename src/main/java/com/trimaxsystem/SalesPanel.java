@@ -617,7 +617,7 @@ public class SalesPanel extends JPanel {
         int choice = JOptionPane.showOptionDialog(this, "Sale saved.\n\nReceipt " + s.receiptNo + "\nTotal " + Money.peso(s.total)
                         + ("PAID".equals(s.paymentStatus) ? (s.change != null ? "\nChange " + Money.peso(s.change) : "") : "\nUnpaid"),
                 "Sale saved", JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
-        if (choice == 0) ReceiptActions.print(this, SalesService.receipt(s), "TRI-MAX receipt " + s.receiptNo);
+        if (choice == 0) ReceiptActions.print(this, SalesService.receipt(s), "JAIMILA receipt " + s.receiptNo);
         else if (choice == 1) ReceiptActions.save(this, SalesService.receipt(s), "Receipt_" + s.receiptNo + ".pdf");
     }
 

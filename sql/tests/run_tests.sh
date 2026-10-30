@@ -321,4 +321,57 @@ rm -f "/tmp/$DB.56.log"
 echo "== Visit or Text / Call: rollback after bookings use it is refused and changes nothing"
 if psql_owner -f 20261029_98_rollback_booking_order_via.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although bookings use it"; exit 1; fi
 check "select to_regprocedure('public.trimax_agent_create_booking_v2(uuid,text,text,text,double precision,double precision,jsonb,text,text,text,text,double precision,double precision,timestamptz)') is not null and exists (select 1 from bookings where order_via = 'VISIT' and visit_photo_path is not null)" "refused rollback left the function and the recorded visits"
+echo "== Booking order editing and driver summary: rollback puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_owner -f 20261029_97_rollback_booking_edit_and_driver_summary.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private'))" "rollback puts back every function exactly (the 3 new ones gone)"
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_owner -f 20261029_03_booking_edit_and_driver_summary.sql
+psql_su -d "$DB" -f tests/57_booking_edit_tests.sql > "/tmp/$DB.57.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL BOOKING EDIT/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.57.log"
+grep -q '^ALL BOOKING EDIT SQL TESTS PASSED' "/tmp/$DB.57.log" || { echo "FAIL booking edit tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.57.log"
+echo "== Payroll from attendance: rollback while unused puts everything back, then apply (twice)"
+fn_before="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_owner -f 20261030_99_rollback_payroll_attendance.sql
+check "select '$fn_before' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and to_regclass('public.staff_attendance') is null and not exists (select 1 from information_schema.columns where table_name = 'payroll_records' and column_name in ('days_worked', 'daily_rate'))" "rollback puts back every function exactly and removes the table and the 2 columns"
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_owner -f 20261030_01_payroll_attendance.sql
+psql_su -d "$DB" -f tests/58_payroll_attendance_tests.sql > "/tmp/$DB.58.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL ATTENDANCE/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.58.log"
+grep -q '^ALL PAYROLL ATTENDANCE SQL TESTS PASSED' "/tmp/$DB.58.log" || { echo "FAIL payroll attendance tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.58.log"
+echo "== Payroll from attendance: rollback after attendance is recorded is refused and changes nothing"
+if psql_owner -f 20261030_99_rollback_payroll_attendance.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although attendance is recorded"; exit 1; fi
+check "select to_regclass('public.staff_attendance') is not null and exists (select 1 from staff_attendance) and exists (select 1 from payroll_records where days_worked is not null)" "refused rollback left the attendance and the payroll days"
+echo "== Payroll made by attendance: rollback while unused puts everything back, then apply (twice)"
+fn_before2="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_owner -f 20261030_98_rollback_payroll_auto.sql
+check "select '$fn_before2' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and to_regclass('public.payroll_account_rates') is null and not exists (select 1 from information_schema.columns where (table_name = 'payroll_records' and column_name = 'auto') or (table_name = 'payroll_staff' and column_name = 'daily_rate')) and not exists (select 1 from pg_trigger where tgname = 'duty_events_payroll')" "rollback puts back every function exactly and removes the rates, the column and the trigger"
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_owner -f 20261030_02_payroll_auto.sql
+psql_su -d "$DB" -f tests/59_payroll_auto_tests.sql > "/tmp/$DB.59.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL PAYROLL AUTO/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.59.log"
+grep -q '^ALL PAYROLL AUTO SQL TESTS PASSED' "/tmp/$DB.59.log" || { echo "FAIL payroll auto tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.59.log"
+echo "== Payroll made by attendance: rollback after rates are set is refused and changes nothing"
+if psql_owner -f 20261030_98_rollback_payroll_auto.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although rates are set"; exit 1; fi
+check "select to_regclass('public.payroll_account_rates') is not null and exists (select 1 from payroll_records where auto) and exists (select 1 from pg_trigger where tgname = 'duty_events_payroll')" "refused rollback left the rates, the automatic records and the trigger"
+echo "== Admin Time in / Time out: rollback while unused puts everything back, then apply (twice)"
+fn_before3="$(psql_owner -tAc "select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')")"
+psql_owner -f 20261030_03_admin_duty.sql
+psql_owner -f 20261030_97_rollback_admin_duty.sql
+check "select '$fn_before3' = (select md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' order by p.oid::regprocedure::text)) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'trimax_private')) and not exists (select 1 from information_schema.columns where table_schema = 'trimax_private' and table_name = 'duty_events' and column_name in ('recorded_by', 'note')) and (select is_nullable = 'NO' from information_schema.columns where table_schema = 'trimax_private' and table_name = 'duty_events' and column_name = 'photo_path')" "rollback puts back every function exactly, removes the 2 columns and makes the photo required again"
+psql_owner -f 20261030_03_admin_duty.sql
+psql_owner -f 20261030_03_admin_duty.sql
+psql_su -d "$DB" -f tests/60_admin_duty_tests.sql > "/tmp/$DB.60.log" 2>&1 || true
+sed -n 's/^.*NOTICE:  //p; /ALL ADMIN DUTY/p; /ERROR/p; /CONTEXT/p' "/tmp/$DB.60.log"
+grep -q '^ALL ADMIN DUTY SQL TESTS PASSED' "/tmp/$DB.60.log" || { echo "FAIL admin duty tests (see above)"; exit 1; }
+rm -f "/tmp/$DB.60.log"
+echo "== Admin Time in / Time out: rollback after an Admin's record is refused and changes nothing"
+if psql_owner -f 20261030_97_rollback_admin_duty.sql >/dev/null 2>&1; then echo "FAIL the rollback ran although Admin records exist"; exit 1; fi
+check "select exists (select 1 from trimax_private.duty_events where recorded_by is not null) and to_regprocedure('trimax_private.admin_duty_event(text,text,text,timestamptz,text)') is not null" "refused rollback left the Admin's records and the function"
 echo "ALL DATABASE TESTS PASSED"

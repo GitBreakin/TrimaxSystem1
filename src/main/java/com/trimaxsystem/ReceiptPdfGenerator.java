@@ -26,6 +26,10 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
  */
 public class ReceiptPdfGenerator {
 
+    /** The business name printed at the top of every receipt (the owner asked for JAIMILA, 2026-10-29). */
+    static final String BUSINESS_NAME = "JAIMILA Consumer Goods Trading";
+
+
     /** Everything printed on the receipt. Fields without a value are left out. */
     public static class ReceiptData {
         // Bookings (the original fields; still used as they were)
@@ -234,7 +238,7 @@ public class ReceiptPdfGenerator {
         float y = height - 26 - 10;
 
         // ----- header
-        text(cs, BOLD, 13, left, y, "TRI-MAX Consumer Goods Trading");
+        text(cs, BOLD, 13, left, y, BUSINESS_NAME);
         textRight(cs, BOLD, 8, right, y + 2, copyLabel);
         y -= 13;
         String title = d.title == null ? "BOOKING RECEIPT" : d.title;

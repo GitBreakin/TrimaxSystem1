@@ -84,7 +84,7 @@ final class SaleDetailDialog {
         JButton paid = UiKit.secondaryButton("Mark as paid...");
         JButton voidBtn = UiKit.dangerButton("Void sale...");
         JButton close = UiKit.primaryButton("Close");
-        print.addActionListener(e -> ReceiptActions.print(d, SalesService.receipt(s), "TRI-MAX receipt " + s.receiptNo));
+        print.addActionListener(e -> ReceiptActions.print(d, SalesService.receipt(s), "JAIMILA receipt " + s.receiptNo));
         save.addActionListener(e -> ReceiptActions.save(d, SalesService.receipt(s), "Receipt_" + s.receiptNo + ".pdf"));
         paid.setVisible(!voided && "UNPAID".equals(s.paymentStatus));
         voidBtn.setVisible(!voided);

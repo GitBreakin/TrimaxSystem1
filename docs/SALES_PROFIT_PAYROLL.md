@@ -149,6 +149,18 @@ payroll record is for. A record is for an account or for an employee without one
 employee; the 14-argument version older Desktops call stays, and keeps a record's employee when it is edited.
 Rollback: `sql/20261029_99_rollback_payroll_staff.sql`.
 
+### Days worked from attendance (database update `20261030_01`, applied to production 2026-10-30)
+
+Basic pay can be worked out as **days worked × daily rate**:
+- The days of agents and drivers come from their Start / End duty (8 hours = 1 day).
+- The days of employees without an app account come from **Attendance → Employees without an app...**, where the Admin marks Present / Half day / Absent.
+
+See docs/PAYROLL_ATTENDANCE.md.
+
+### Payroll made by attendance, by itself (database update `20261030_02`)
+
+Each employee, agents and drivers included, has a daily rate (**Payroll → Employees and daily rates**). After that, the Admin only marks Present / Half day / Absent, and agents and drivers only Start / End duty. The unpaid payroll record of the pay week (Monday to Sunday) is made and updated by itself, and paid records are never changed. It lowers net profit like any payroll, in the month the week ends. The Admin can also record a Time in / Time out for an agent or driver (`20261030_03`). See docs/PAYROLL_ATTENDANCE.md, section 4.
+
 ## Other expenses (Expenses, database update `20261027_02`)
 
 Owner's request of 2026-10-27: business costs that are not payroll and not stock lower net profit.
