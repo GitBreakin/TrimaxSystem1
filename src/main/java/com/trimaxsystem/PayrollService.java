@@ -254,9 +254,14 @@ final class PayrollService {
         int dutyDays, openDays, present, halfDays, absent;
         String openDates;           // "2025-02-08, 2025-02-10"
 
+        /** False when nothing is recorded in the period (no duty at all, no day marked): the days are not filled in. */
+        boolean any() {
+            return fromDuty ? dutyDays > 0 : present + halfDays + absent > 0;
+        }
+
         /** "5 days (41 h on 8 duty days; 2 days without End duty: 2025-02-08, 2025-02-10, not counted)" */
         String summary() {
-            String d = Money.qty(days) + (days.compareTo(BigDecimal.ONE) == 0 ? " day" : " days");
+            String d = dayWord(days);
             if (fromDuty) {
                 return d + " (" + Money.qty(hours) + " h on " + dutyDays + (dutyDays == 1 ? " duty day" : " duty days")
                         + (openDays > 0 ? "; " + openDays + (openDays == 1 ? " day" : " days") + " without End duty, not counted: "
@@ -344,6 +349,29 @@ final class PayrollService {
     static BigDecimal basicFromDays(BigDecimal days, BigDecimal rate) {
         if (days == null || rate == null) return null;
         return days.multiply(rate).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    /** "1 day", "0.5 day", "0 days", "11.5 days". */
+    static String dayWord(BigDecimal days) {
+        boolean one = days.signum() > 0 && days.compareTo(BigDecimal.ONE) <= 0;
+        return Money.qty(days) + (one ? " day" : " days");
+    }
+
+    /**
+     * Why the basic pay is not days worked x daily rate, or null when it is. Null also when Days worked is empty
+     * (a fixed amount) or when there are no days and no pay. Owner, 2026-10-30: a half day must halve the pay, so
+     * the editor checks this before saving.
+     */
+    static String basicCheck(BigDecimal days, BigDecimal rate, BigDecimal basic) {
+        if (days == null) return null;
+        if (rate == null) {
+            if (days.signum() == 0 && (basic == null || basic.signum() == 0)) return null;
+            return "Enter the daily rate. Basic pay = " + dayWord(days) + " x daily rate.";
+        }
+        BigDecimal want = basicFromDays(days, rate);
+        if (basic != null && basic.compareTo(want) == 0) return null;
+        return "Basic pay " + (basic == null ? "is empty" : Money.peso(basic)) + ", but " + Money.qty(days) + " x "
+                + Money.peso(rate) + " = " + Money.peso(want) + ".";
     }
 
     static void voidRecord(long id, String reason) throws Db.Failure {

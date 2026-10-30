@@ -44,14 +44,26 @@ The app already records **Start duty** and **End duty** with a photo (Desktop �
 - **Days worked** is filled in from attendance. The line under it shows how it was counted, for example:
   - *From attendance: 11.5 days (93 h on 12 duty days; 1 day without End duty, not counted: 2026-10-08; 8 h = 1 day)*
   - *From attendance: 12.5 days (12 present, 1 half day, 1 absent)*
-- **Daily rate** is filled in with the rate of the employee's last record, if there is one.
-- **Basic pay** = Days worked × Daily rate, worked out as you type.
+- **Daily rate** is filled in with the rate of the employee's last record, if there is one. Otherwise type it: the pay for one full day, for example 600.
+- **Basic pay** = Days worked × Daily rate, worked out as you type. The line under the attendance shows it, for example *Basic pay = 0.5 x ₱600.00 = ₱300.00*.
 - Days, rate and basic pay can all still be changed by hand. Allowances and deductions work as before.
 - **Use attendance** puts the counted days back in the field.
 - **Opening a saved record never changes its pay.** It shows the attendance count, and only **Use attendance** puts it in.
-- A typed name ("Other person") has no attendance. Type the days or the basic pay.
+- A typed name ("Other person") has no attendance. Choose the employee from the list (for example *arlyn (pahinante)*) so their attendance counts.
 - The payroll list has a **Days x rate** column, for example *11.5 x ₱600.00*.
 - Saving the days and rate is in the history (audit log), with the old values when they change.
+
+### A half day pays half (added 2026-10-30, after the owner's test)
+
+The owner marked a half day, but the basic pay stayed ₱600. The basic pay had been typed with no **Daily rate**, so nothing could halve it. Now the editor says so instead of saving it silently:
+
+- **Days worked but no Daily rate:**
+  - the line under the attendance says *Enter the daily rate. Basic pay = 0.5 day x daily rate.*;
+  - **Save** asks first: **Enter the daily rate** (nothing is saved) or **Save as typed** (a fixed amount).
+- **Basic pay different from days × rate,** for example typed by hand: **Save** asks **Use ₱300.00**, **Keep ₱600.00** or **Cancel**.
+- **Attendance changed after the record was saved,** for example a half day corrected to present: opening the record says *Attendance now counts 1 day; this record has 0.5 day. Click Use attendance to update it.* The saved pay does not change by itself.
+- **Nothing recorded in the period** (no marks, no duty): **Days worked** is left empty instead of 0. The editor says no attendance is recorded, and a fixed basic pay saves without a question.
+- **Leave Days worked empty** to pay a fixed amount.
 
 ## Database
 
@@ -73,13 +85,17 @@ The app already records **Start duty** and **End duty** with a photo (Desktop �
   The whole suite passes (969 checks).
 - **Dry run** on the local production-like copy, applied twice: the 3 new functions were added (`attendance_days` `f93c59fa…`, `save_staff_attendance` `7489144e…`, `set_payroll_attendance` `f318d8ba…`) and every other function stayed the same. No row changed, the table has RLS on, and only the owner can use the table and functions.
 - **Production read-only pre-check (2026-10-30):** the 6 functions this update builds on (`require_admin`, `audit_as`, `peso`, both `save_payroll`, `save_payroll_staff`) have the same fingerprints as the dry-run copy; `staff_attendance` and the 2 columns are not there yet.
-- **Desktop unit tests:** 116 pass, including `PayrollAttendanceTest`.
-- **Desktop end-to-end tests:** E2EAttendance (15 checks) covers:
+- **Desktop unit tests:** 118 pass, including `PayrollAttendanceTest`.
+- **Desktop end-to-end tests:** E2EAttendance (28 checks) covers:
   - marking a helper Present and then Half day;
   - Days this month = 1.5;
   - a driver with duty of 8 h, 4 h and a Start without End → 1.5 days;
   - the helper → 1.5 days;
   - basic pay = days × rate, saved with the record, in the audit log;
-  - the list column.
+  - the list column;
+  - a half day with the basic pay typed and no rate: Save asks, and nothing is saved until the rate is entered (0.5 × 600 = 300);
+  - a basic pay typed by hand: Save asks, and **Use** puts back days × rate;
+  - attendance changed after saving: the record says so, and **Use attendance** gives 1 × 600;
+  - nothing marked: the days are left empty, and a fixed pay saves without a question.
 
-  All 9 end-to-end scripts pass (146 checks), including E2EStaff with the new fields.
+  All 9 end-to-end scripts pass (159 checks), including E2EStaff with the new fields.

@@ -28,6 +28,41 @@ class PayrollAttendanceTest {
     }
 
     @Test
+    void aHalfDayMustHalveTheBasicPay() {
+        // owner, 2026-10-30: half day marked, basic pay typed as 600, no daily rate -> asked for the rate
+        assertEquals("Enter the daily rate. Basic pay = 0.5 day x daily rate.",
+                PayrollService.basicCheck(new BigDecimal("0.5"), null, new BigDecimal("600")));
+        assertEquals("Basic pay " + Money.peso(new BigDecimal("600")) + ", but 0.5 x " + Money.peso(new BigDecimal("600"))
+                        + " = " + Money.peso(new BigDecimal("300.00")) + ".",
+                PayrollService.basicCheck(new BigDecimal("0.5"), new BigDecimal("600"), new BigDecimal("600")));
+        assertNull(PayrollService.basicCheck(new BigDecimal("0.5"), new BigDecimal("600"), new BigDecimal("300")));
+        assertNull(PayrollService.basicCheck(new BigDecimal("1.5"), new BigDecimal("500"), new BigDecimal("750.00")));
+        // a fixed amount (Days worked empty) and no days with no pay are fine
+        assertNull(PayrollService.basicCheck(null, null, new BigDecimal("600")));
+        assertNull(PayrollService.basicCheck(BigDecimal.ZERO, null, BigDecimal.ZERO));
+        assertNotNull(PayrollService.basicCheck(BigDecimal.ZERO, null, new BigDecimal("600")));
+        assertNotNull(PayrollService.basicCheck(BigDecimal.ZERO, new BigDecimal("600"), new BigDecimal("600")));
+        assertEquals("0.5 day", PayrollService.dayWord(new BigDecimal("0.5")));
+        assertEquals("1 day", PayrollService.dayWord(BigDecimal.ONE));
+        assertEquals("0 days", PayrollService.dayWord(BigDecimal.ZERO));
+        assertEquals("11.5 days", PayrollService.dayWord(new BigDecimal("11.50")));
+    }
+
+    @Test
+    void nothingRecordedIsNotZeroDays() {
+        PayrollService.AttendanceDays none = new PayrollService.AttendanceDays();
+        assertFalse(none.any());
+        PayrollService.AttendanceDays absent = new PayrollService.AttendanceDays();
+        absent.absent = 1;
+        assertTrue(absent.any());
+        PayrollService.AttendanceDays open = new PayrollService.AttendanceDays();
+        open.fromDuty = true;
+        open.dutyDays = 1;
+        open.openDays = 1;
+        assertTrue(open.any());
+    }
+
+    @Test
     void theListShowsDaysAndRate() {
         assertEquals("11.5 x " + Theme.money(new BigDecimal("600")), PayrollService.daysText(new BigDecimal("11.50"), new BigDecimal("600")));
         assertEquals("1 day", PayrollService.daysText(BigDecimal.ONE, null));

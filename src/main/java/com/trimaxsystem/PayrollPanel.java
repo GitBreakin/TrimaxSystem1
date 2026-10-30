@@ -387,6 +387,7 @@ public class PayrollPanel extends JPanel {
             final boolean withDays = Db.payrollAttendanceReady();
             JTextField days = new JTextField(6), rate = new JTextField(10);
             JLabel att = new JLabel(" ");
+            JLabel calc = new JLabel(" ");   // basic pay = days x rate, or why it is not
             JButton useAtt = UiKit.secondaryButton("Use attendance");
             final PayrollService.AttendanceDays[] lastAtt = {null};
             final int[] attSeq = {0};
@@ -404,10 +405,13 @@ public class PayrollPanel extends JPanel {
             for (JTextField f : new JTextField[]{name, start, end, basic, allow, ded, paidOn, notes, days, rate}) UiKit.styleField(f);
             att.setFont(Theme.SMALL);
             att.setForeground(Theme.MUTED);
+            calc.setFont(Theme.font(Font.BOLD, 12));
+            calc.setForeground(Theme.MUTED);
             UiKit.placeholder(days, "0");
-            UiKit.placeholder(rate, "0.00");
-            days.setToolTipText("Days worked in the pay period. Filled in from attendance; you can change it.");
-            rate.setToolTipText("Pay per day. Basic pay becomes days worked x daily rate.");
+            UiKit.placeholder(rate, "e.g. 600");
+            days.setToolTipText("Days worked in the pay period. Filled in from attendance; you can change it. "
+                    + "Leave it empty to pay a fixed amount.");
+            rate.setToolTipText("Pay for one full day. Basic pay becomes days worked x daily rate (a half day = half).");
             who.setFont(Theme.SUBTLE);
             method.setFont(Theme.SUBTLE);
             for (JRadioButton r : new JRadioButton[]{unpaid, paid}) {
@@ -493,11 +497,49 @@ public class PayrollPanel extends JPanel {
                     // shown when saving
                 }
             };
+            // Under the attendance line: what the basic pay is (days x rate) or why it is not; on a saved record, also
+            // when attendance now counts other days than the record has (owner, 2026-10-30: "kahit halfday, yung
+            // basic pay nya hindi nagiging half").
+            Runnable showCalc = () -> {
+                if (!withDays) return;
+                BigDecimal dd, rr, bb;
+                try {
+                    dd = PayrollService.parseDays(days.getText());
+                    rr = Money.parse(rate.getText(), "daily rate", true);
+                    bb = Money.parse(basic.getText(), "basic pay", true);
+                } catch (IllegalArgumentException ex) {
+                    calc.setText(" ");
+                    return;
+                }
+                List<String> lines = new ArrayList<>();
+                boolean warn = false;
+                String problem = PayrollService.basicCheck(dd, rr, bb);
+                if (problem != null) {
+                    lines.add(problem);
+                    warn = true;
+                } else if (dd != null && rr != null) {
+                    lines.add("Basic pay = " + Money.qty(dd) + " x " + Money.peso(rr) + " = "
+                            + Money.peso(PayrollService.basicFromDays(dd, rr)));
+                }
+                PayrollService.AttendanceDays a = lastAtt[0];
+                if (!isNew && a != null && a.any() && (dd == null || a.days.compareTo(dd) != 0)) {
+                    lines.add("Attendance now counts " + PayrollService.dayWord(a.days) + "; this record has "
+                            + (dd == null ? "no days" : PayrollService.dayWord(dd)) + ". Click Use attendance to update it.");
+                    warn = true;
+                }
+                calc.setForeground(warn ? Theme.WARN : Theme.MUTED);
+                calc.setText(lines.isEmpty() ? " " : "<html>" + StockDialogs.esc(String.join("\n", lines)).replace("\n", "<br>") + "</html>");
+            };
             days.getDocument().addDocumentListener(StockDialogs.listener(() -> {
                 if (!filling[0]) daysTyped[0] = true;
                 daysToBasic.run();
+                showCalc.run();
             }));
-            rate.getDocument().addDocumentListener(StockDialogs.listener(daysToBasic));
+            rate.getDocument().addDocumentListener(StockDialogs.listener(() -> {
+                daysToBasic.run();
+                showCalc.run();
+            }));
+            basic.getDocument().addDocumentListener(StockDialogs.listener(showCalc));
             Runnable fetchAttendance = () -> {
                 if (!withDays) return;
                 Object w = who.getSelectedItem();
@@ -538,19 +580,26 @@ public class PayrollPanel extends JPanel {
                             Object[] r = get();
                             PayrollService.AttendanceDays a = (PayrollService.AttendanceDays) r[0];
                             lastAtt[0] = a;
-                            att.setText("<html>From attendance: <b>" + StockDialogs.esc(a.summary()) + "</b></html>");
-                            useAtt.setEnabled(true);
+                            if (a.any()) {
+                                att.setText("<html>From attendance: <b>" + StockDialogs.esc(a.summary()) + "</b></html>");
+                            } else {
+                                att.setText("<html>No attendance recorded in this period"
+                                        + (emp.isStaff() ? " (mark it in Attendance → Employees without an app...)" : " (no Start / End duty)")
+                                        + ". Type the days worked, or leave them empty to pay a fixed amount.</html>");
+                            }
+                            useAtt.setEnabled(a.any());
                             // Only a new record is filled in by itself; an existing one changes only with "Use attendance"
-                            // (opening a saved record must never change its pay).
+                            // (opening a saved record must never change its pay). Nothing recorded: days left empty.
                             if (isNew) {
                                 filling[0] = true;
                                 try {
-                                    if (!daysTyped[0]) days.setText(Money.qty(a.days));
+                                    if (!daysTyped[0]) days.setText(a.any() ? Money.qty(a.days) : "");
                                     if (rate.getText().trim().isEmpty() && r[1] != null) rate.setText(((BigDecimal) r[1]).toPlainString());
                                 } finally {
                                     filling[0] = false;
                                 }
                             }
+                            showCalc.run();
                         } catch (Exception ex) {
                             Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                             att.setText("<html>" + StockDialogs.esc(cause.getMessage()) + "</html>");
@@ -567,6 +616,7 @@ public class PayrollPanel extends JPanel {
                     filling[0] = false;
                 }
                 daysTyped[0] = false;
+                if (rate.getText().trim().isEmpty()) rate.requestFocusInWindow();   // basic pay needs the daily rate
             });
             Timer attTimer = new Timer(500, e -> fetchAttendance.run());
             attTimer.setRepeats(false);
@@ -575,7 +625,10 @@ public class PayrollPanel extends JPanel {
                 attTimer.restart();
             });
             for (JTextField f : new JTextField[]{start, end}) f.getDocument().addDocumentListener(StockDialogs.listener(attTimer::restart));
-            if (withDays) fetchAttendance.run();
+            if (withDays) {
+                showCalc.run();
+                fetchAttendance.run();
+            }
 
             JButton firstHalf = UiKit.secondaryButton("1st–15th");
             JButton secondHalf = UiKit.secondaryButton("16th–end");
@@ -637,7 +690,13 @@ public class PayrollPanel extends JPanel {
                 c.gridwidth = 3;
                 att.setPreferredSize(new Dimension(560, 34));
                 att.setVerticalAlignment(SwingConstants.TOP);
-                form.add(att, c);
+                calc.setPreferredSize(new Dimension(560, 34));
+                calc.setVerticalAlignment(SwingConstants.TOP);
+                JPanel attBox = new JPanel(new BorderLayout(0, 2));
+                attBox.setOpaque(false);
+                attBox.add(att, BorderLayout.NORTH);
+                attBox.add(calc, BorderLayout.CENTER);
+                form.add(attBox, c);
                 c.gridwidth = 1;
             }
             c.gridy = 4;
@@ -675,7 +734,7 @@ public class PayrollPanel extends JPanel {
             cancel.addActionListener(e -> d.dispose());
             save.addActionListener(e -> {
                 final LocalDate s, en, po;
-                final BigDecimal b, a, de;
+                final BigDecimal typedBasic, a, de;
                 final String nm = name.getText().trim();
                 try {
                     s = LocalDate.parse(start.getText().trim());
@@ -687,7 +746,7 @@ public class PayrollPanel extends JPanel {
                 }
                 final BigDecimal dw, dr;
                 try {
-                    b = Money.parse(basic.getText(), "basic pay", false);
+                    typedBasic = Money.parse(basic.getText(), "basic pay", false);
                     a = Money.parse(allow.getText(), "allowances", true);
                     de = Money.parse(ded.getText(), "deductions", true);
                     dw = withDays ? PayrollService.parseDays(days.getText()) : null;
@@ -696,6 +755,38 @@ public class PayrollPanel extends JPanel {
                     error.setText(ex.getMessage());
                     return;
                 }
+                // The basic pay must be days worked x daily rate (a half day pays half); ask when it is not.
+                BigDecimal basicToSave = typedBasic;
+                String problem = withDays ? PayrollService.basicCheck(dw, dr, typedBasic) : null;
+                if (problem != null) {
+                    if (dr == null) {
+                        Object[] opts = {"Enter the daily rate", "Save as typed"};
+                        int ch = JOptionPane.showOptionDialog(d, "<html>" + StockDialogs.esc(problem)
+                                        + "<br><br>Days worked: <b>" + StockDialogs.esc(PayrollService.dayWord(dw)) + "</b>"
+                                        + "<br>Basic pay typed: <b>" + StockDialogs.esc(Money.peso(typedBasic)) + "</b>"
+                                        + "<br><br>Without a daily rate the basic pay is not counted from the days."
+                                        + "<br>To pay a fixed amount instead, choose Save as typed.</html>",
+                                "Daily rate", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
+                        if (ch != 1) {
+                            error.setText("Enter the daily rate (pay for one full day).");
+                            rate.requestFocusInWindow();
+                            return;
+                        }
+                    } else {
+                        BigDecimal want = PayrollService.basicFromDays(dw, dr);
+                        Object[] opts = {"Use " + Money.peso(want), "Keep " + Money.peso(typedBasic), "Cancel"};
+                        int ch = JOptionPane.showOptionDialog(d, "<html>" + StockDialogs.esc(problem)
+                                        + "<br><br>Use the days x daily rate, or keep the basic pay you typed?</html>",
+                                "Basic pay", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, opts, opts[0]);
+                        if (ch == 0) {
+                            basic.setText(want.toPlainString());
+                            basicToSave = want;
+                        } else if (ch != 1) {
+                            return;
+                        }
+                    }
+                }
+                final BigDecimal b = basicToSave;
                 // save the days and rate when given, or to clear ones the record had
                 final boolean sendDays = withDays && (dw != null || dr != null
                         || (!isNew && (rec.daysWorked != null || rec.dailyRate != null)));
